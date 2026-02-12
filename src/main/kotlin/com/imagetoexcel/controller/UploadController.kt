@@ -1,7 +1,6 @@
 package com.imagetoexcel.controller
 
-import com.imagetoexcel.service.ExcelService
-import com.imagetoexcel.service.OcrService
+import com.imagetoexcel.service.UploadService
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -14,8 +13,7 @@ import org.springframework.web.multipart.MultipartFile
 
 @Controller
 class UploadController(
-    private val ocrService: OcrService,
-    private val excelService: ExcelService
+    private val uploadService: UploadService
 ) {
 
     @GetMapping("/")
@@ -25,34 +23,31 @@ class UploadController(
 
     @PostMapping("/upload")
     fun upload(
-        @RequestParam("file") file: MultipartFile,
+        @RequestParam("files") files: List<MultipartFile>,
         model: Model
     ): String {
-        if (file.isEmpty) {
+        val validFiles = files.filter { !it.isEmpty }
+        if (validFiles.isEmpty()) {
             model.addAttribute("error", "파일을 선택해주세요.")
             return "index"
         }
 
-        try {
-            val extractedText = ocrService.extractText(file)
-            val lines = ocrService.parseLines(extractedText)
+        val orders = uploadService.extractOrders(validFiles)
 
-            model.addAttribute("lines", lines)
-            model.addAttribute("rawText", extractedText)
-            model.addAttribute("success", true)
-        } catch (e: Exception) {
-            model.addAttribute("error", "OCR 처리 중 오류가 발생했습니다: ${e.message}")
-        }
+        model.addAttribute("orders", orders)
+        model.addAttribute("ordersJson", uploadService.ordersToJson(orders))
+        model.addAttribute("fileCount", validFiles.size)
+        model.addAttribute("success", true)
 
         return "index"
     }
 
     @PostMapping("/download")
-    fun download(@RequestParam("lines") lines: List<String>): ResponseEntity<ByteArray> {
-        val excelBytes = excelService.createExcel(lines)
+    fun download(@RequestParam("ordersJson") ordersJson: String): ResponseEntity<ByteArray> {
+        val excelBytes = uploadService.generateExcel(ordersJson)
 
         return ResponseEntity.ok()
-            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=ocr_result.xlsx")
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=orders.xlsx")
             .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
             .body(excelBytes)
     }

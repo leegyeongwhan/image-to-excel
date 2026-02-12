@@ -25,9 +25,6 @@ build/
 .DS_Store
 Thumbs.db
 
-# Tesseract 데이터 (용량이 큼)
-src/main/resources/tessdata/*.traineddata
-
 # 환경 설정
 .env
 *.local
