@@ -26,9 +26,10 @@ dependencies {
     // Kotlin
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
+    implementation("io.github.oshai:kotlin-logging-jvm:7.0.3")
 
-    // OCR - Tesseract
-    implementation("net.sourceforge.tess4j:tess4j:5.11.0")
+    // .env 파일 자동 로드
+    implementation("me.paulschwarz:spring-dotenv:4.0.0")
 
     // Excel - Apache POI
     implementation("org.apache.poi:poi-ooxml:5.2.5")
