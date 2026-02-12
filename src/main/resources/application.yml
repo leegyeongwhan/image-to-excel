@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: image-to-excel
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+server:
+  port: 8080
+
+# Tesseract 설정
+tesseract:
+  data-path: ${TESSDATA_PREFIX:src/main/resources/tessdata}
+  language: tha+eng
