@@ -53,6 +53,16 @@
             animation: spin 1s linear infinite; margin: 0 auto 1rem;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .usage-card {
+            background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;
+            padding: 1.25rem; margin-bottom: 1.5rem;
+        }
+        .usage-card h3 { font-size: 0.95rem; color: #495057; margin-bottom: 0.75rem; }
+        .usage-stats { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+        .usage-stat { font-size: 0.85rem; color: #666; }
+        .usage-stat strong { color: #333; font-size: 1rem; }
+        .usage-bar { height: 6px; background: #e9ecef; border-radius: 3px; margin-top: 0.75rem; }
+        .usage-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
     </style>
 </head>
 <body>
@@ -61,6 +71,19 @@
         <p style="text-align: center; color: #666; margin-bottom: 2rem;">
             메신저 스크린샷에서 주문 정보 추출 (이름, 주소, 전화번호)
         </p>
+
+        <div class="usage-card" id="usageCard" style="display: none;">
+            <h3>이번 달 API 사용량</h3>
+            <div class="usage-stats">
+                <div class="usage-stat">사용: <strong id="usageCount">-</strong>건</div>
+                <div class="usage-stat">무료 한도: <strong>1,000</strong>건</div>
+                <div class="usage-stat">남은 무료: <strong id="usageFree">-</strong>건</div>
+                <div class="usage-stat">예상 요금: <strong id="usageCost">-</strong></div>
+            </div>
+            <div class="usage-bar">
+                <div class="usage-bar-fill" id="usageBarFill" style="width: 0%;"></div>
+            </div>
+        </div>
 
         <div th:if="${error}" class="alert alert-error" th:text="${error}"></div>
 
@@ -143,6 +166,21 @@
             submitBtn.textContent = '처리 중...';
             loadingIndicator.classList.add('active');
         });
+
+        fetch('/api/usage')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('usageCard').style.display = 'block';
+                document.getElementById('usageCount').textContent = data.callCount.toLocaleString();
+                document.getElementById('usageFree').textContent = data.freeRemaining.toLocaleString();
+                document.getElementById('usageCost').textContent = '$' + data.estimatedCost.toFixed(2);
+
+                const percent = Math.min(100, (data.callCount / data.freeLimit) * 100);
+                const bar = document.getElementById('usageBarFill');
+                bar.style.width = percent + '%';
+                bar.style.background = percent >= 100 ? '#dc3545' : percent >= 80 ? '#ffc107' : '#28a745';
+            })
+            .catch(() => {});
 
         const dropzone = document.getElementById('dropzone');
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(event => {
