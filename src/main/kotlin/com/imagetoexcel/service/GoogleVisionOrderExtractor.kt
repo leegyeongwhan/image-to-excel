@@ -11,6 +11,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Service
 import org.springframework.web.client.HttpClientErrorException
+import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
 import org.springframework.web.client.RestTemplate
 import org.springframework.web.multipart.MultipartFile
@@ -20,7 +21,8 @@ import kotlin.collections.get
 @Service
 class GoogleVisionOrderExtractor(
     private val restTemplate: RestTemplate,
-    private val properties: GoogleVisionProperties
+    private val properties: GoogleVisionProperties,
+    private val apiUsageTracker: ApiUsageTracker
 ) : OrderExtractor {
 
     private val logger = KotlinLogging.logger {}
@@ -71,21 +73,49 @@ class GoogleVisionOrderExtractor(
         val entity = HttpEntity(requestBody, headers)
 
         val response = executeApiCall(url, entity)
+        apiUsageTracker.increment()
         checkApiLevelError(response)
         return extractText(response)
     }
 
     private fun executeApiCall(url: String, entity: HttpEntity<Map<String, List<Map<String, Any>>>>): Map<*, *> {
-        try {
-            return restTemplate.postForObject(url, entity, Map::class.java)
-                ?: throw OrderException.VisionApiError(GoogleApiError.EMPTY_RESPONSE)
-        } catch (e: HttpClientErrorException) {
-            val status = e.statusCode.value()
-            logger.error { "Google Vision API 호출 실패 (HTTP $status): ${e.responseBodyAsString}" }
-            throw OrderException.VisionApiErrorWithDetail(GoogleApiError.userMessageForStatus(status))
-        } catch (e: ResourceAccessException) {
-            logger.error(e) { "Google Vision API 연결 실패" }
-            throw OrderException.NetworkError(e)
+        val maxRetries = 3
+        var lastException: Exception? = null
+
+        repeat(maxRetries) { attempt ->
+            try {
+                return restTemplate.postForObject(url, entity, Map::class.java)
+                    ?: throw OrderException.VisionApiError(GoogleApiError.EMPTY_RESPONSE)
+            } catch (e: HttpClientErrorException) {
+                val status = e.statusCode.value()
+                if (status == 429) {
+                    logger.warn { "API 할당량 초과 (429), 재시도 ${attempt + 1}/$maxRetries" }
+                    lastException = e
+                    Thread.sleep(1000L * (1 shl attempt))
+                } else {
+                    logger.error { "Google Vision API 호출 실패 (HTTP $status): ${e.responseBodyAsString}" }
+                    throw OrderException.VisionApiErrorWithDetail(GoogleApiError.userMessageForStatus(status))
+                }
+            } catch (e: HttpServerErrorException) {
+                val status = e.statusCode.value()
+                logger.warn { "Google Vision API 서버 오류 (HTTP $status), 재시도 ${attempt + 1}/$maxRetries" }
+                lastException = e
+                Thread.sleep(1000L * (1 shl attempt))
+            } catch (e: ResourceAccessException) {
+                logger.warn { "Google Vision API 연결 실패, 재시도 ${attempt + 1}/$maxRetries" }
+                lastException = e
+                Thread.sleep(1000L * (1 shl attempt))
+            }
+        }
+
+        when (lastException) {
+            is HttpClientErrorException -> throw OrderException.VisionApiErrorWithDetail(GoogleApiError.RATE_LIMIT.message)
+            is HttpServerErrorException -> {
+                val status = (lastException as HttpServerErrorException).statusCode.value()
+                throw OrderException.VisionApiErrorWithDetail("Google API 서버 오류 (HTTP $status). 잠시 후 다시 시도해주세요.")
+            }
+            is ResourceAccessException -> throw OrderException.NetworkError(lastException!!)
+            else -> throw OrderException.VisionApiErrorWithDetail("알 수 없는 오류가 발생했습니다.")
         }
     }
 

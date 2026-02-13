@@ -1,5 +1,6 @@
 package com.imagetoexcel.controller
 
+import com.imagetoexcel.service.ApiUsageTracker
 import com.imagetoexcel.service.UploadService
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -9,11 +10,13 @@ import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.ResponseBody
 import org.springframework.web.multipart.MultipartFile
 
 @Controller
 class UploadController(
-    private val uploadService: UploadService
+    private val uploadService: UploadService,
+    private val apiUsageTracker: ApiUsageTracker
 ) {
 
     @GetMapping("/")
@@ -40,6 +43,12 @@ class UploadController(
         model.addAttribute("success", true)
 
         return "index"
+    }
+
+    @GetMapping("/api/usage")
+    @ResponseBody
+    fun getUsage(): ApiUsageTracker.UsageInfo {
+        return apiUsageTracker.getUsage()
     }
 
     @PostMapping("/download")
