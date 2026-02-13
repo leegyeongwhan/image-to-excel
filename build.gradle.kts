@@ -27,6 +27,7 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
 
     // .env 파일 자동 로드
     implementation("me.paulschwarz:spring-dotenv:4.0.0")
