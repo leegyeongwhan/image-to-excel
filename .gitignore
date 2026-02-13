@@ -32,3 +32,10 @@ Thumbs.db
 # 임시 파일
 tmp/
 temp/
+nul
+
+# Claude Code
+.claude/
+
+# API 사용량 데이터
+data/
