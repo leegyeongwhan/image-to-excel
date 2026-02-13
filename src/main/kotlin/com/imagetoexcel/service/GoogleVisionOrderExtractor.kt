@@ -6,6 +6,9 @@ import com.imagetoexcel.domain.OrderTextParser
 import com.imagetoexcel.domain.enum.GoogleApiError
 import com.imagetoexcel.dto.OrderData
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -28,6 +31,10 @@ class GoogleVisionOrderExtractor(
     private val logger = KotlinLogging.logger {}
     private val parser = OrderTextParser()
 
+    companion object {
+        private const val MAX_CONCURRENT_CALLS = 20
+    }
+
     override fun extractOrderData(file: MultipartFile): OrderData {
         if (properties.apiKey.isBlank()) {
             throw OrderException.ApiKeyNotConfigured()
@@ -40,16 +47,24 @@ class GoogleVisionOrderExtractor(
     }
 
     override fun extractOrderDataBatch(files: List<MultipartFile>): List<OrderData> {
-        return files.map { file ->
-            try {
-                extractOrderData(file)
-            } catch (e: OrderException) {
-                logger.error(e) { "이미지 처리 실패: ${file.originalFilename}" }
-                OrderData(
-                    name = "ERROR: ${file.originalFilename}",
-                    address = "처리 실패: ${e.message}"
-                )
-            }
+        logger.info { "병렬 처리 시작: ${files.size}개 이미지 (동시 ${MAX_CONCURRENT_CALLS}개)" }
+        return runBlocking(Dispatchers.IO) {
+            val semaphore = Semaphore(MAX_CONCURRENT_CALLS)
+            files.map { file ->
+                async {
+                    semaphore.withPermit {
+                        try {
+                            extractOrderData(file)
+                        } catch (e: OrderException) {
+                            logger.error(e) { "이미지 처리 실패: ${file.originalFilename}" }
+                            OrderData(
+                                name = "ERROR: ${file.originalFilename}",
+                                address = "처리 실패: ${e.message}"
+                            )
+                        }
+                    }
+                }
+            }.awaitAll()
         }
     }
 
