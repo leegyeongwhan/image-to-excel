@@ -1,6 +1,8 @@
 package com.imagetoexcel.controller
 
 import com.imagetoexcel.service.ApiUsageTracker
+import com.imagetoexcel.service.JusoAddressService
+import com.imagetoexcel.service.JusoSearchResult
 import com.imagetoexcel.service.UploadService
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -16,7 +18,8 @@ import org.springframework.web.multipart.MultipartFile
 @Controller
 class UploadController(
     private val uploadService: UploadService,
-    private val apiUsageTracker: ApiUsageTracker
+    private val apiUsageTracker: ApiUsageTracker,
+    private val jusoAddressService: JusoAddressService
 ) {
 
     @GetMapping("/")
@@ -49,6 +52,15 @@ class UploadController(
     @ResponseBody
     fun getUsage(): ApiUsageTracker.UsageInfo {
         return apiUsageTracker.getUsage()
+    }
+
+    @GetMapping("/api/address/search")
+    @ResponseBody
+    fun searchAddress(
+        @RequestParam("keyword") keyword: String,
+        @RequestParam("page", defaultValue = "1") page: Int
+    ): JusoSearchResult {
+        return jusoAddressService.search(keyword, page)
     }
 
     @PostMapping("/download")
