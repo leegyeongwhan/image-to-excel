@@ -10,11 +10,13 @@ import org.springframework.web.multipart.MultipartFile
 class UploadService(
     private val orderExtractor: OrderExtractor,
     private val orderExcelGenerator: OrderExcelGenerator,
+    private val jusoAddressService: JusoAddressService,
     private val objectMapper: ObjectMapper
 ) {
 
     fun extractOrders(files: List<MultipartFile>): List<OrderData> {
-        return orderExtractor.extractOrderDataBatch(files)
+        val orders = orderExtractor.extractOrderDataBatch(files)
+        return orders.map { it.copy(address = jusoAddressService.enrich(it.address)) }
     }
 
     fun ordersToJson(orders: List<OrderData>): String {

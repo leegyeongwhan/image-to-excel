@@ -6,6 +6,8 @@ import com.imagetoexcel.dto.OrderData
 class OrderTextParser {
 
     private val addressSuffixes = Regex("[시군구읍면동리로길번지호층아파트빌라오피스텔]|APT")
+    private val roadNamePattern = Regex("[\uAC00-\uD7A3]{2,}[로길]$|[\uAC00-\uD7A3]{2,}[로길]\\s")
+    private val numberPattern = Regex("^\\d{1,5}(-\\d{1,5})?(번지)?$")
 
     private val phonePatterns = listOf(
         Regex("(01[016789][-\\s]?\\d{3,4}[-\\s]?\\d{4})"),
@@ -58,6 +60,30 @@ class OrderTextParser {
 
         for (line in lines) {
             if (line.any { it.isKorean() } && line.any { it.isDigit() } && addressSuffixes.containsMatchIn(line)) {
+                return line
+            }
+        }
+
+        // 3단계: 도로명(~로, ~길) 패턴 찾고 앞뒤 줄의 번지수 결합
+        for ((index, line) in lines.withIndex()) {
+            if (roadNamePattern.containsMatchIn(line) && line.any { it.isKorean() }) {
+                val parts = mutableListOf<String>()
+
+                // 앞 줄이 번지수면 결합 (예: "764-28" + "서리등로" → "서리등로 764-28")
+                if (index > 0 && numberPattern.matches(lines[index - 1].trim())) {
+                    parts.add(line)
+                    parts.add(lines[index - 1].trim())
+                    return parts.joinToString(" ").trim()
+                }
+
+                // 뒷 줄이 번지수면 결합 (예: "서리등로" + "764-28")
+                if (index < lines.size - 1 && numberPattern.matches(lines[index + 1].trim())) {
+                    parts.add(line)
+                    parts.add(lines[index + 1].trim())
+                    return parts.joinToString(" ").trim()
+                }
+
+                // 번지수 없이 도로명만 있는 경우
                 return line
             }
         }
