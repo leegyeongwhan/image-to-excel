@@ -14,3 +14,8 @@ google:
   vision:
     api-key: ${GOOGLE_CLOUD_API_KEY:}
     api-url: https://vision.googleapis.com/v1/images:annotate
+
+# 도로명주소 API 설정 (juso.go.kr)
+juso:
+  api-key: ${JUSO_API_KEY:}
+  api-url: https://business.juso.go.kr/addrlink/addrLinkApi.do

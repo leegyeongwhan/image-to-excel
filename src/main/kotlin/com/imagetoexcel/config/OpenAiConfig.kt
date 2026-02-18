@@ -11,6 +11,12 @@ data class GoogleVisionProperties(
     val apiUrl: String = "https://vision.googleapis.com/v1/images:annotate"
 )
 
+@ConfigurationProperties(prefix = "juso")
+data class JusoProperties(
+    val apiKey: String = "",
+    val apiUrl: String = "https://business.juso.go.kr/addrlink/addrLinkApi.do"
+)
+
 @Configuration
 class AppConfig {
 
