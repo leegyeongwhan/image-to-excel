@@ -3,6 +3,9 @@ package com.imagetoexcel.service
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.imagetoexcel.dto.OrderData
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.springframework.stereotype.Service
 import org.springframework.web.multipart.MultipartFile
 
@@ -14,9 +17,26 @@ class UploadService(
     private val objectMapper: ObjectMapper
 ) {
 
+    companion object {
+        private const val MAX_CONCURRENT_JUSO_CALLS = 10
+    }
+
     fun extractOrders(files: List<MultipartFile>): List<OrderData> {
         val orders = orderExtractor.extractOrderDataBatch(files)
-        return orders.map { it.copy(address = jusoAddressService.enrich(it.address)) }
+        return enrichAddressesBatch(orders)
+    }
+
+    private fun enrichAddressesBatch(orders: List<OrderData>): List<OrderData> {
+        return runBlocking(Dispatchers.IO) {
+            val semaphore = Semaphore(MAX_CONCURRENT_JUSO_CALLS)
+            orders.map { order ->
+                async {
+                    semaphore.withPermit {
+                        order.copy(address = jusoAddressService.enrich(order.address))
+                    }
+                }
+            }.awaitAll()
+        }
     }
 
     fun ordersToJson(orders: List<OrderData>): String {
