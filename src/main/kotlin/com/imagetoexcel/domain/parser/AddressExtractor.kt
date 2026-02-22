@@ -4,7 +4,7 @@ import com.imagetoexcel.domain.enum.KoreanRegion
 
 class AddressExtractor {
 
-    private val addressSuffixes = Regex("[시군구읍면동리로길번지호층아파트빌라오피스텔]|APT")
+    private val addressSuffixes = Regex("[\uAC00-\uD7A3][시군구읍면동리로길]|\\d+[호층]|번지|아파트|빌라|오피스텔|APT")
     private val roadNamePattern = Regex("[\uAC00-\uD7A3]{2,}[로길]$|[\uAC00-\uD7A3]{2,}[로길]\\s")
     private val numberPattern = Regex("^\\d{1,5}(-\\d{1,5})?(번지)?$")
 

@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.imagetoexcel.component.OrderExcelGenerator
 import com.imagetoexcel.dto.OrderData
-import com.imagetoexcel.infrastructure.JusoApiClient
 import com.imagetoexcel.infrastructure.OrderExtractor
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
@@ -16,7 +15,7 @@ import org.springframework.web.multipart.MultipartFile
 class UploadService(
     private val orderExtractor: OrderExtractor,
     private val orderExcelGenerator: OrderExcelGenerator,
-    private val jusoApiClient: JusoApiClient,
+    private val addressEnrichService: AddressEnrichService,
     private val objectMapper: ObjectMapper
 ) {
 
@@ -35,7 +34,7 @@ class UploadService(
             orders.map { order ->
                 async {
                     semaphore.withPermit {
-                        order.copy(address = jusoApiClient.enrich(order.address))
+                        order.copy(address = addressEnrichService.enrich(order.address))
                     }
                 }
             }.awaitAll()

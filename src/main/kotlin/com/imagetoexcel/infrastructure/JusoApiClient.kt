@@ -75,29 +75,5 @@ class JusoApiClient(
         return JusoSearchResult(totalCount = totalCount, addresses = addresses)
     }
 
-    fun enrich(address: String): String {
-        if (address.isBlank() || address.startsWith("[인식 실패]")) return address
-
-        val result = search(address, page = 1, countPerPage = 1)
-        if (result.totalCount > 0 && result.addresses.isNotEmpty()) {
-            val enriched = result.addresses.first().roadAddr
-            logger.info { "주소 자동 보정: \"$address\" → \"$enriched\"" }
-            return enriched
-        }
-
-        val roadNameOnly = address.replace(Regex("\\s*\\d+[-\\d]*\\s*"), " ").trim()
-        if (roadNameOnly != address && roadNameOnly.isNotBlank()) {
-            val fallback = search(roadNameOnly, page = 1, countPerPage = 1)
-            if (fallback.totalCount > 0 && fallback.addresses.isNotEmpty()) {
-                val enriched = fallback.addresses.first().roadAddr
-                logger.info { "주소 자동 보정(도로명): \"$address\" → \"$enriched\"" }
-                return enriched
-            }
-        }
-
-        logger.info { "주소 자동 보정 실패, 원본 유지: \"$address\"" }
-        return address
-    }
-
     private fun emptyResult() = JusoSearchResult(totalCount = 0, addresses = emptyList())
 }

@@ -18,12 +18,6 @@ class OrderTextParser {
         val address = addressExtractor.extract(lines)
         val name = nameExtractor.extract(lines, address, phoneResult.lineIndex)
 
-        val finalAddress = address.ifBlank {
-            lines.filter { line -> line.any { it in '\uAC00'..'\uD7A3' } }
-                .joinToString(" ")
-                .ifBlank { "외국인" }
-        }
-
-        return OrderData(name = name, address = finalAddress, phone = phoneResult.phone)
+        return OrderData(name = name, address = address, phone = phoneResult.phone)
     }
 }

@@ -19,3 +19,8 @@ google:
 juso:
   api-key: ${JUSO_API_KEY:}
   api-url: https://business.juso.go.kr/addrlink/addrLinkApi.do
+
+# Naver Geocoding API 설정 (fallback)
+naver:
+  client-id: ${NAVER_CLIENT_ID:}
+  client-secret: ${NAVER_CLIENT_SECRET:}

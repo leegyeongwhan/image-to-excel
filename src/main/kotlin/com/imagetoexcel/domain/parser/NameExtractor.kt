@@ -4,19 +4,23 @@ import kotlin.math.abs
 
 class NameExtractor {
 
-    private val nameWithPhonePattern = Regex("([A-Za-z][A-Za-z\\s]+)\\s*\\d{10,11}")
+    private val nameWithPhonePattern = Regex("^([A-Za-z][A-Za-z ]+?)\\s+\\d{10,11}")
     private val englishNamePattern = Regex("^[A-Za-z][A-Za-z\\s]{1,30}$")
     private val singleNamePattern = Regex("\\b([A-Z][a-z]{2,15})\\b")
     private val excludeWords = setOf(
         "Intake", "Online", "Image", "Excel", "Error", "Anyeong", "Khaopan",
-        "Messenger", "Facebook", "Message", "Send", "Photo", "Forwarded"
+        "Messenger", "Facebook", "Message", "Send", "Photo", "Forwarded",
+        "Bora", "Purlple", "SET", "Sordonway", "Demand", "Transaction"
     )
 
     fun extract(lines: List<String>, address: String, phoneLineIndex: Int): String {
-        // 1순위: 이름+전화번호가 같은 줄에 있는 경우
+        // 1순위: 이름+전화번호가 같은 줄에 있는 경우 이러면 보통 이름이있다
         for (line in lines) {
             val match = nameWithPhonePattern.find(line)
-            if (match != null) return match.groupValues[1].trim()
+            if (match != null) {
+                val name = match.groupValues[1].trim()
+                if (name !in excludeWords) return name
+            }
         }
 
         // 후보 수집
@@ -25,11 +29,17 @@ class NameExtractor {
 
         for ((index, line) in lines.withIndex()) {
             if (line == address) continue
+            if (index == phoneLineIndex) continue  // 전화번호 줄 자체 제외 (OCR 쓰레기 방지)
             if (line.contains("KRW", ignoreCase = true)) continue
             if (isAddressRomanization(line)) continue
 
             if (englishNamePattern.matches(line)) {
-                candidates.add(Candidate(line.trim(), index, true))
+                val name = line.trim()
+                val words = name.split("\\s+".toRegex())
+                // excludeWords 체크 + 반복 문자 이름 제외 (III 등)
+                if (words.none { it in excludeWords } && name.toSet().count { !it.isWhitespace() } >= 2) {
+                    candidates.add(Candidate(name, index, true))
+                }
             } else {
                 val match = singleNamePattern.find(line) ?: continue
                 val name = match.groupValues[1]
