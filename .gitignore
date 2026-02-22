@@ -39,3 +39,10 @@ nul
 
 # API 사용량 데이터
 data/
+
+# 템플릿 폴더 내 이미지 파일
+src/main/resources/templates/*.jpg
+src/main/resources/templates/*.jpeg
+src/main/resources/templates/*.png
+src/main/resources/templates/*.gif
+src/main/resources/templates/*.webp

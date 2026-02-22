@@ -1,8 +1,8 @@
-package com.imagetoexcel.service
+package com.imagetoexcel.infrastructure
 
 import com.imagetoexcel.config.JusoProperties
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 import org.springframework.web.client.RestTemplate
 import org.springframework.web.util.UriComponentsBuilder
 
@@ -19,8 +19,8 @@ data class JusoSearchResult(
     val addresses: List<JusoAddress>
 )
 
-@Service
-class JusoAddressService(
+@Component
+class JusoApiClient(
     private val jusoProperties: JusoProperties,
     private val restTemplate: RestTemplate
 ) {
@@ -78,7 +78,6 @@ class JusoAddressService(
     fun enrich(address: String): String {
         if (address.isBlank() || address.startsWith("[인식 실패]")) return address
 
-        // 1차: 파싱된 주소 그대로 검색
         val result = search(address, page = 1, countPerPage = 1)
         if (result.totalCount > 0 && result.addresses.isNotEmpty()) {
             val enriched = result.addresses.first().roadAddr
@@ -86,7 +85,6 @@ class JusoAddressService(
             return enriched
         }
 
-        // 2차: 숫자 제거 후 도로명만으로 재검색 (예: "서리등로 764-28" → "서리등로")
         val roadNameOnly = address.replace(Regex("\\s*\\d+[-\\d]*\\s*"), " ").trim()
         if (roadNameOnly != address && roadNameOnly.isNotBlank()) {
             val fallback = search(roadNameOnly, page = 1, countPerPage = 1)

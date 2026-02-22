@@ -1,5 +1,6 @@
-package com.imagetoexcel.service
+package com.imagetoexcel.infrastructure
 
+import com.imagetoexcel.component.ApiUsageTracker
 import com.imagetoexcel.config.GoogleVisionProperties
 import com.imagetoexcel.config.exception.OrderException
 import com.imagetoexcel.domain.OrderTextParser
@@ -12,7 +13,7 @@ import kotlinx.coroutines.sync.withPermit
 import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
@@ -21,7 +22,7 @@ import org.springframework.web.multipart.MultipartFile
 import java.util.Base64
 import kotlin.collections.get
 
-@Service
+@Component
 class GoogleVisionOrderExtractor(
     private val restTemplate: RestTemplate,
     private val properties: GoogleVisionProperties,
@@ -129,7 +130,7 @@ class GoogleVisionOrderExtractor(
                 val status = (lastException as HttpServerErrorException).statusCode.value()
                 throw OrderException.VisionApiErrorWithDetail("Google API 서버 오류 (HTTP $status). 잠시 후 다시 시도해주세요.")
             }
-            is ResourceAccessException -> throw OrderException.NetworkError(lastException!!)
+            is ResourceAccessException -> throw OrderException.NetworkError(lastException)
             else -> throw OrderException.VisionApiErrorWithDetail("알 수 없는 오류가 발생했습니다.")
         }
     }

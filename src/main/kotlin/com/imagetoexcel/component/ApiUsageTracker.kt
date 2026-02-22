@@ -1,17 +1,17 @@
-package com.imagetoexcel.service
+package com.imagetoexcel.component
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.annotation.PreDestroy
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.YearMonth
 import java.time.LocalDateTime
 import java.util.concurrent.atomic.AtomicInteger
 
-@Service
+@Component
 class ApiUsageTracker(
     private val objectMapper: ObjectMapper
 ) {
