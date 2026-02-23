@@ -40,6 +40,20 @@ class AddressExtractor {
         }
 
         if (addressLines.isNotEmpty()) {
+            // OCR이 "107호 01033345885"를 "1075 01033345885" 처럼 읽을 때:
+            // 호(号) 문자가 숫자로 오인되어 붙어버린 경우 → 짧은 숫자를 호수로 추출해 주소에 추가
+            val lastAddressLine = lines.firstOrNull { it == addressLines.last() }
+            val lastIdx = if (lastAddressLine != null) lines.indexOf(lastAddressLine) else -1
+            if (lastIdx >= 0 && lastIdx + 1 < lines.size) {
+                val nextLine = lines[lastIdx + 1].trim()
+                // 패턴: "1075 01033345885" → 앞 1~4자리 숫자 + 공백 + 010 시작 전화번호
+                val unitBeforePhone = Regex("^(\\d{1,4})\\s+01[016789]\\d{7,8}$").find(nextLine)
+                val hasUnitAlready = addressLines.joinToString("").contains(Regex("[호동층]"))
+                if (unitBeforePhone != null && !hasUnitAlready) {
+                    val unit = unitBeforePhone.groupValues[1]
+                    addressLines.add("${unit}호")
+                }
+            }
             return addressLines.joinToString(" ").trim()
         }
 
