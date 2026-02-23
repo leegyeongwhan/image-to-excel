@@ -24,3 +24,7 @@ juso:
 naver:
   client-id: ${NAVER_CLIENT_ID:}
   client-secret: ${NAVER_CLIENT_SECRET:}
+
+# 주문 기본값 설정
+order:
+  default-phone: ${ORDER_DEFAULT_PHONE:01086100102}  # OCR에서 전화번호 못찾을 때 기본값

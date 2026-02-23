@@ -2,6 +2,7 @@ package com.imagetoexcel.infrastructure
 
 import com.imagetoexcel.component.ApiUsageTracker
 import com.imagetoexcel.config.GoogleVisionProperties
+import com.imagetoexcel.config.OrderProperties
 import com.imagetoexcel.config.exception.OrderException
 import com.imagetoexcel.domain.OrderTextParser
 import com.imagetoexcel.domain.enum.GoogleApiError
@@ -26,6 +27,7 @@ import kotlin.collections.get
 class GoogleVisionOrderExtractor(
     private val restTemplate: RestTemplate,
     private val properties: GoogleVisionProperties,
+    private val orderProperties: OrderProperties,
     private val apiUsageTracker: ApiUsageTracker
 ) : OrderExtractor {
 
@@ -44,7 +46,15 @@ class GoogleVisionOrderExtractor(
         val base64Image = Base64.getEncoder().encodeToString(file.bytes)
         val ocrText = callGoogleVision(base64Image)
         logger.info { "OCR 결과:\n$ocrText" }
-        return parser.parse(ocrText)
+        val orderData = parser.parse(ocrText)
+
+        // OCR에서 전화번호를 못 찾으면 기본 번호 사용
+        return if (orderData.phone.isNullOrBlank()) {
+            logger.info { "전화번호 미감지 → 기본번호 사용: ${orderProperties.defaultPhone}" }
+            orderData.copy(phone = orderProperties.defaultPhone)
+        } else {
+            orderData
+        }
     }
 
     override fun extractOrderDataBatch(files: List<MultipartFile>): List<OrderData> {
@@ -76,6 +86,10 @@ class GoogleVisionOrderExtractor(
                     "image" to mapOf("content" to base64Image),
                     "features" to listOf(
                         mapOf("type" to "DOCUMENT_TEXT_DETECTION")
+                    ),
+                    // 한국어+태국어 힌트: 파란 채팅버블/위치카드처럼 배경이 복잡해도 한글 인식률 향상
+                    "imageContext" to mapOf(
+                        "languageHints" to listOf("ko", "th")
                     )
                 )
             )

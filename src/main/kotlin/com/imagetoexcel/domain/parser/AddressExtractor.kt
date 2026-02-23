@@ -4,9 +4,20 @@ import com.imagetoexcel.domain.enum.KoreanRegion
 
 class AddressExtractor {
 
-    private val addressSuffixes = Regex("[\uAC00-\uD7A3][시군구읍면동리로길]|\\d+[호층]|번지|아파트|빌라|오피스텔|APT")
-    private val roadNamePattern = Regex("[\uAC00-\uD7A3]{2,}[로길]$|[\uAC00-\uD7A3]{2,}[로길]\\s")
-    private val numberPattern = Regex("^\\d{1,5}(-\\d{1,5})?(번지)?$")
+    private val addressSuffixes = Regex("[가-힣][시군구읍면동리로길]|[가-힣]\\d+[로길]|\\d+[호층]|번지|아파트|빌라|오피스텔|APT")
+    private val roadNamePattern = Regex("[가-힣]{2,}\\d*[로길]$|[가-힣]{2,}\\d*[로길]\\s")
+
+    // 건물번호 패턴: 최대 4자리 (5자리는 우편번호 → 제외)
+    // 예: "80" ✓, "10-12" ✓, "428-20" ✓ / "44064" ❌ (우편번호)
+    private val numberPattern = Regex("^\\d{1,4}(-\\d{1,4})?(번지)?$")
+
+    // 줄 안에 독립적인(공백으로 구분된) 숫자가 있는지 확인
+    // "대송4길" → "4"는 도로명 안에 붙어있어 독립숫자 아님 → false
+    // "메나리길 123" → " 123" 독립숫자 → true
+    private val standaloneNumber = Regex("(?:^|\\s)\\d{1,4}(-\\d{1,4})?(?:\\s|$|번지|호|층)")
+
+    // 지번 주소 패턴: "XX동/읍/면/리 xxx번지" - 지역명 없이 잘린 경우 대응
+    private val jibunPattern = Regex("[가-힣]{2,}(?:동|읍|면|리)\\s*\\d{1,5}(?:-\\d{1,5})?")
 
     fun extract(lines: List<String>): String {
         // 1단계: 지역 키워드 기반 여러 줄 결합
@@ -32,35 +43,59 @@ class AddressExtractor {
             return addressLines.joinToString(" ").trim()
         }
 
-        // 2단계: 한국어 + 숫자 + 주소 접미사가 있는 단일 줄
+        // 2단계: 한국어 + 독립 번지수 + 주소 접미사 (한 줄에 도로명+번호 모두 있는 경우)
+        // "메나리길 123" → 독립숫자 O → 반환
+        // "대송4길" → 독립숫자 X (4는 도로명 안에 붙어있음) → 스킵 → 3단계에서 다음 줄 "80" 결합
         for (line in lines) {
-            if (line.any { it.isKorean() } && line.any { it.isDigit() } && addressSuffixes.containsMatchIn(line)) {
+            if (line.any { it.isKorean() }
+                && standaloneNumber.containsMatchIn(line)
+                && addressSuffixes.containsMatchIn(line)) {
                 return line
             }
         }
 
-        // 3단계: 도로명(~로, ~길) 패턴 찾고 앞뒤 줄의 번지수 결합
+        // 3단계: 도로명(~로, ~길) + 앞뒤 줄 번지수 결합
+        // 로마자 병기 줄(Daesong 4-gil) 은 건너뛰고 최대 3줄 앞을 탐색
         for ((index, line) in lines.withIndex()) {
             if (roadNamePattern.containsMatchIn(line) && line.any { it.isKorean() }) {
-                val parts = mutableListOf<String>()
-
+                // 앞 줄에 번지수가 있는 경우
                 if (index > 0 && numberPattern.matches(lines[index - 1].trim())) {
-                    parts.add(line)
-                    parts.add(lines[index - 1].trim())
-                    return parts.joinToString(" ").trim()
+                    return "$line ${lines[index - 1].trim()}"
                 }
 
-                if (index < lines.size - 1 && numberPattern.matches(lines[index + 1].trim())) {
-                    parts.add(line)
-                    parts.add(lines[index + 1].trim())
-                    return parts.joinToString(" ").trim()
+                // 뒷 줄 최대 3줄 탐색 (로마자 병기 줄 건너뜀)
+                for (ahead in 1..3) {
+                    val nextIdx = index + ahead
+                    if (nextIdx >= lines.size) break
+                    val nextLine = lines[nextIdx].trim()
+                    if (isRomanization(nextLine)) continue   // "Daesong 4-gil" 건너뜀
+                    if (numberPattern.matches(nextLine)) {
+                        return "$line $nextLine"             // "대송4길 80"
+                    }
+                    break   // 번지수도 로마자도 아니면 중단
                 }
 
+                return line
+            }
+        }
+
+        // 4단계: 지번 주소 패턴 (동/읍/면/리 + 번지) - 지역명 없이 잘린 경우
+        for (line in lines) {
+            if (jibunPattern.containsMatchIn(line)) {
                 return line
             }
         }
 
         return ""
+    }
+
+    /** 영문 로마자 병기 줄 여부 (주소 탐색 시 건너뜀) */
+    private fun isRomanization(line: String): Boolean {
+        val lower = line.lowercase()
+        return lower.contains("-gil") || lower.contains("-ro") ||
+                lower.contains("-daero") || lower.contains("beon-gil") ||
+                lower.contains("myeon") || lower.contains("heungcheon") ||
+                lower.contains("yeoju") || lower.contains("daesong")
     }
 
     private fun Char.isKorean(): Boolean = this in '\uAC00'..'\uD7A3'
