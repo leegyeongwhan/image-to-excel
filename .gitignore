@@ -9,8 +9,8 @@ build/
 *.ipr
 *.iws
 .vscode/
-bin/      # IntelliJ 컴파일 출력
-out/      # IntelliJ 컴파일 출력 (구버전)
+bin/
+out/
 
 # Kotlin
 *.class

@@ -30,6 +30,7 @@ class UploadController(
     @PostMapping("/upload")
     fun upload(
         @RequestParam("files") files: List<MultipartFile>,
+        @RequestParam("existingOrdersJson", required = false) existingOrdersJson: String?,
         model: Model
     ): String {
         val validFiles = files.filter { !it.isEmpty }
@@ -38,11 +39,19 @@ class UploadController(
             return "index"
         }
 
-        val orders = uploadService.extractOrders(validFiles)
+        val existingOrders =
+            if (!existingOrdersJson.isNullOrBlank()) {
+                uploadService.jsonToOrders(existingOrdersJson)
+            } else {
+                emptyList()
+            }
 
-        model.addAttribute("orders", orders)
-        model.addAttribute("ordersJson", uploadService.ordersToJson(orders))
-        model.addAttribute("fileCount", validFiles.size)
+        val newOrders = uploadService.extractOrders(validFiles)
+        val combinedOrders = existingOrders + newOrders
+
+        model.addAttribute("orders", combinedOrders)
+        model.addAttribute("ordersJson", uploadService.ordersToJson(combinedOrders))
+        model.addAttribute("newFileCount", validFiles.size)
         model.addAttribute("success", true)
 
         return "index"
@@ -69,7 +78,11 @@ class UploadController(
 
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=orders.xlsx")
-            .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .contentType(
+                MediaType.parseMediaType(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            )
             .body(excelBytes)
     }
 }

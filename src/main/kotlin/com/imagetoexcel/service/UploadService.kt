@@ -41,6 +41,11 @@ class UploadService(
         }
     }
 
+    fun jsonToOrders(ordersJson: String): List<OrderData> {
+        if (ordersJson.isBlank()) return emptyList()
+        return objectMapper.readValue(ordersJson)
+    }
+
     fun ordersToJson(orders: List<OrderData>): String {
         return objectMapper.writeValueAsString(orders)
     }

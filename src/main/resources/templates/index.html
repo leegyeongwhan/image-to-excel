@@ -1,182 +1,495 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org" lang="ko">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image to Excel - 주문 추출</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #f5f5f5;
             min-height: 100vh;
             padding: 2rem;
         }
-        .container { max-width: 900px; margin: 0 auto; }
-        h1 { color: #333; margin-bottom: 2rem; text-align: center; }
-        .card {
-            background: white; border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            padding: 2rem; margin-bottom: 1.5rem;
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
         }
-        .upload-form { display: flex; flex-direction: column; gap: 1rem; }
+
+        h1 {
+            color: #333;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .upload-form {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
         .file-input {
-            border: 2px dashed #ddd; border-radius: 8px;
-            padding: 2rem; text-align: center; cursor: pointer;
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
             transition: border-color 0.3s;
         }
-        .file-input:hover { border-color: #007bff; }
-        .file-input input { display: none; }
-        .btn {
-            background: #007bff; color: white; border: none;
-            padding: 0.75rem 1.5rem; border-radius: 4px;
-            cursor: pointer; font-size: 1rem; transition: background 0.3s;
-        }
-        .btn:hover { background: #0056b3; }
-        .btn:disabled { background: #ccc; cursor: not-allowed; }
-        .btn-success { background: #28a745; }
-        .btn-success:hover { background: #1e7e34; }
-        .alert { padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
-        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .result-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-        .result-table th, .result-table td {
-            border: 1px solid #ddd; padding: 0.75rem; text-align: left;
-        }
-        .result-table th { background: #f8f9fa; }
-        .actions { display: flex; gap: 1rem; margin-top: 1rem; }
-        .loading { display: none; text-align: center; padding: 2rem; }
-        .loading.active { display: block; }
-        .spinner {
-            border: 4px solid #f3f3f3; border-top: 4px solid #007bff;
-            border-radius: 50%; width: 40px; height: 40px;
-            animation: spin 1s linear infinite; margin: 0 auto 1rem;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .usage-card {
-            background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;
-            padding: 1.25rem; margin-bottom: 1.5rem;
-        }
-        .usage-card h3 { font-size: 0.95rem; color: #495057; margin-bottom: 0.75rem; }
-        .usage-stats { display: flex; gap: 1.5rem; flex-wrap: wrap; }
-        .usage-stat { font-size: 0.85rem; color: #666; }
-        .usage-stat strong { color: #333; font-size: 1rem; }
-        .usage-bar { height: 6px; background: #e9ecef; border-radius: 3px; margin-top: 0.75rem; }
-        .usage-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
 
-        /* 주소 검색 관련 스타일 */
-        .address-cell { display: flex; align-items: center; gap: 0.5rem; }
-        .address-text { flex: 1; }
-        .btn-search {
-            background: #6c757d; color: white; border: none;
-            padding: 0.25rem 0.5rem; border-radius: 3px;
-            cursor: pointer; font-size: 0.75rem; white-space: nowrap;
+        .file-input:hover {
+            border-color: #007bff;
+        }
+
+        .file-input input {
+            display: none;
+        }
+
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
             transition: background 0.3s;
         }
-        .btn-search:hover { background: #545b62; }
+
+        .btn:hover {
+            background: #0056b3;
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-success {
+            background: #28a745;
+        }
+
+        .btn-success:hover {
+            background: #1e7e34;
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .result-table th,
+        .result-table td {
+            border: 1px solid #ddd;
+            padding: 0.75rem;
+            text-align: left;
+        }
+
+        .result-table th {
+            background: #f8f9fa;
+        }
+
+        .actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .usage-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+            padding: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .usage-card h3 {
+            font-size: 0.95rem;
+            color: #495057;
+            margin-bottom: 0.75rem;
+        }
+
+        .usage-stats {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .usage-stat {
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        .usage-stat strong {
+            color: #333;
+            font-size: 1rem;
+        }
+
+        .usage-bar {
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            margin-top: 0.75rem;
+        }
+
+        .usage-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        /* 주소 검색 관련 스타일 */
+        .address-cell {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .address-text {
+            flex: 1;
+        }
+
+        .btn-search {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            transition: background 0.3s;
+        }
+
+        .btn-search:hover {
+            background: #545b62;
+        }
+
+        .btn-delete {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            transition: background 0.3s;
+        }
+
+        .btn-delete:hover {
+            background: #c82333;
+        }
 
         /* 모달 스타일 (juso.go.kr 공식 테마 적용) */
         .modal-overlay {
-            display: none; position: fixed; top: 0; left: 0;
-            width: 100%; height: 100%; background: rgba(0,0,0,0.5);
-            z-index: 1000; justify-content: center; align-items: center;
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
         }
-        .modal-overlay.active { display: flex; }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
         .modal {
-            background: #ECECEC; border-radius: 8px; padding: 1.5rem;
-            width: 90%; max-width: 600px; max-height: 80vh;
-            display: flex; flex-direction: column;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            background: #ECECEC;
+            border-radius: 8px;
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
-        .modal h3 { margin-bottom: 1rem; color: #333; }
+
+        .modal h3 {
+            margin-bottom: 1rem;
+            color: #333;
+        }
+
         .search-input-group {
-            display: flex; gap: 0.5rem; margin-bottom: 1rem;
-            background: #FFFFFF; border-radius: 4px; padding: 0.25rem;
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            background: #FFFFFF;
+            border-radius: 4px;
+            padding: 0.25rem;
         }
+
         .search-input-group input {
-            flex: 1; padding: 0.5rem 0.75rem; border: none;
-            border-radius: 4px; font-size: 0.95rem;
-            background: #FFFFFF; color: #222222;
+            flex: 1;
+            padding: 0.5rem 0.75rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.95rem;
+            background: #FFFFFF;
+            color: #222222;
         }
-        .search-input-group input:focus { outline: none; }
-        .search-input-group input::placeholder { color: #999; }
+
+        .search-input-group input:focus {
+            outline: none;
+        }
+
+        .search-input-group input::placeholder {
+            color: #999;
+        }
+
         .btn-modal-search {
-            background: #007bff; color: white; border: none;
-            padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;
-            font-size: 0.9rem; white-space: nowrap;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            white-space: nowrap;
         }
-        .btn-modal-search:hover { background: #0056b3; }
+
+        .btn-modal-search:hover {
+            background: #0056b3;
+        }
+
         .search-results {
-            flex: 1; overflow-y: auto; border: 1px solid #ddd;
-            border-radius: 4px; background: #FFFFFF;
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #FFFFFF;
         }
+
         .search-result-item {
-            padding: 0.75rem 1rem; border-bottom: 1px solid #f0f0f0;
-            cursor: pointer; transition: background 0.2s;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.2s;
         }
-        .search-result-item:nth-child(odd) { background: #FFFFFF; }
-        .search-result-item:nth-child(even) { background: #F8F8F8; }
-        .search-result-item:last-child { border-bottom: none; }
-        .search-result-item:hover { background: #e8f4ff; }
+
+        .search-result-item:nth-child(odd) {
+            background: #FFFFFF;
+        }
+
+        .search-result-item:nth-child(even) {
+            background: #F8F8F8;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .search-result-item:hover {
+            background: #e8f4ff;
+        }
+
         .search-result-road {
-            font-size: 0.95rem; color: #333333; font-weight: 500;
+            font-size: 0.95rem;
+            color: #333333;
+            font-weight: 500;
         }
+
         .search-result-jibun {
-            font-size: 0.8rem; color: #888; margin-top: 0.2rem;
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 0.2rem;
         }
+
         .search-result-zip {
-            font-size: 0.75rem; color: #aaa; margin-top: 0.15rem;
+            font-size: 0.75rem;
+            color: #aaa;
+            margin-top: 0.15rem;
         }
+
         .search-status {
-            padding: 1.5rem; text-align: center; color: #888; font-size: 0.9rem;
+            padding: 1.5rem;
+            text-align: center;
+            color: #888;
+            font-size: 0.9rem;
         }
+
         .search-pagination {
-            display: flex; justify-content: center; gap: 0.5rem;
-            margin-top: 0.75rem; padding-top: 0.75rem;
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
             border-top: 1px solid #ddd;
         }
+
         .btn-page {
-            background: #FFFFFF; border: 1px solid #ddd; padding: 0.3rem 0.6rem;
-            border-radius: 3px; cursor: pointer; font-size: 0.85rem;
+            background: #FFFFFF;
+            border: 1px solid #ddd;
+            padding: 0.3rem 0.6rem;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.85rem;
         }
-        .btn-page:hover { background: #e9ecef; }
-        .btn-page:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-page:hover {
+            background: #e9ecef;
+        }
+
+        .btn-page:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         .modal-close {
-            background: #6c757d; color: white; border: none;
-            padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;
-            font-size: 0.9rem; margin-top: 0.75rem; align-self: flex-end;
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-top: 0.75rem;
+            align-self: flex-end;
         }
-        .modal-close:hover { background: #545b62; }
+
+        .modal-close:hover {
+            background: #545b62;
+        }
 
         /* 네이버지도 fallback */
         .naver-fallback {
-            padding: 1rem; text-align: center;
-            border-top: 1px solid #e9ecef; margin-top: 0.5rem;
+            padding: 1rem;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+            margin-top: 0.5rem;
         }
-        .naver-fallback p { font-size: 0.85rem; color: #666; margin-bottom: 0.75rem; }
+
+        .naver-fallback p {
+            font-size: 0.85rem;
+            color: #666;
+            margin-bottom: 0.75rem;
+        }
+
         .btn-naver {
-            background: #03c75a; color: white; border: none;
-            padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;
-            font-size: 0.9rem; text-decoration: none; display: inline-block;
+            background: #03c75a;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            text-decoration: none;
+            display: inline-block;
         }
-        .btn-naver:hover { background: #02b351; }
+
+        .btn-naver:hover {
+            background: #02b351;
+        }
+
         .manual-input-group {
-            display: flex; gap: 0.5rem; margin-top: 0.75rem;
-            padding-top: 0.75rem; border-top: 1px solid #f0f0f0;
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid #f0f0f0;
         }
+
         .manual-input-group input {
-            flex: 1; padding: 0.5rem 0.75rem; border: 1px solid #ddd;
-            border-radius: 4px; font-size: 0.9rem;
+            flex: 1;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
         }
-        .manual-input-group input:focus { outline: none; border-color: #03c75a; }
+
+        .manual-input-group input:focus {
+            outline: none;
+            border-color: #03c75a;
+        }
+
         .btn-manual-apply {
-            background: #fd7e14; color: white; border: none;
-            padding: 0.5rem 0.75rem; border-radius: 4px; cursor: pointer;
-            font-size: 0.85rem; white-space: nowrap;
+            background: #fd7e14;
+            color: white;
+            border: none;
+            padding: 0.5rem 0.75rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            white-space: nowrap;
         }
-        .btn-manual-apply:hover { background: #e8590c; }
+
+        .btn-manual-apply:hover {
+            background: #e8590c;
+        }
     </style>
 </head>
+
 <body>
     <div class="container">
         <h1>Image to Excel</h1>
@@ -200,11 +513,11 @@
         <div th:if="${error}" class="alert alert-error" th:text="${error}"></div>
 
         <div class="card">
-            <form class="upload-form" method="post" action="/upload"
-                  enctype="multipart/form-data" id="uploadForm">
+            <form class="upload-form" method="post" action="/upload" enctype="multipart/form-data" id="uploadForm">
+                <input type="hidden" name="existingOrdersJson" id="existingOrdersJsonInput" th:if="${ordersJson}"
+                    th:value="${ordersJson}">
                 <label class="file-input" id="dropzone">
-                    <input type="file" name="files" id="fileInput"
-                           accept="image/*" multiple required>
+                    <input type="file" name="files" id="fileInput" accept="image/*" multiple required>
                     <div id="dropzone-text">
                         <p>클릭하거나 이미지를 드래그하세요 (여러 장 선택 가능)</p>
                         <p style="color: #999; font-size: 0.9rem; margin-top: 0.5rem;">
@@ -224,8 +537,8 @@
         <div th:if="${success}" class="card">
             <h2 style="margin-bottom: 1rem;">분석 결과</h2>
             <div class="alert alert-success">
-                <span th:text="${fileCount}">0</span>개의 이미지에서
-                <span th:text="${#lists.size(orders)}">0</span>건의 주문 정보를 추출했습니다.
+                <span th:text="${newFileCount ?: 0}">0</span>개의 이미지를 분석하여,
+                현재 총 <strong th:text="${#lists.size(orders)}">0</strong>건의 주문 정보가 목록에 있습니다.
             </div>
 
             <table class="result-table" id="resultTable">
@@ -235,6 +548,7 @@
                         <th>이름</th>
                         <th>주소</th>
                         <th>전화번호</th>
+                        <th style="width: 60px;">관리</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -245,13 +559,17 @@
                             <div class="address-cell">
                                 <span class="address-text" th:text="${order.address}">Address</span>
                                 <button type="button" class="btn-search"
-                                        th:attr="data-index=${stat.index},data-address=${order.address}"
-                                        onclick="openAddressSearch(this)">
+                                    th:attr="data-index=${stat.index},data-address=${order.address}"
+                                    onclick="openAddressSearch(this)">
                                     주소검색
                                 </button>
                             </div>
                         </td>
                         <td th:text="${order.phone}">Phone</td>
+                        <td>
+                            <button type="button" class="btn-delete" th:attr="data-index=${stat.index}"
+                                onclick="deleteOrder(this)">삭제</button>
+                        </td>
                     </tr>
                 </tbody>
             </table>
@@ -270,7 +588,7 @@
             <h3>도로명주소 검색</h3>
             <div class="search-input-group">
                 <input type="text" id="addressSearchInput" placeholder="도로명을 입력하세요 (예: 흑석로)"
-                       onkeydown="if(event.key==='Enter') searchAddress()">
+                    onkeydown="if(event.key==='Enter') searchAddress()">
                 <button type="button" class="btn-modal-search" onclick="searchAddress()">검색</button>
             </div>
             <div class="search-results" id="searchResults">
@@ -292,7 +610,7 @@
         const uploadForm = document.getElementById('uploadForm');
         const loadingIndicator = document.getElementById('loadingIndicator');
 
-        fileInput.addEventListener('change', function() {
+        fileInput.addEventListener('change', function () {
             if (this.files.length > 0) {
                 const count = this.files.length;
                 const names = Array.from(this.files).map(f => f.name).join(', ');
@@ -303,7 +621,7 @@
             }
         });
 
-        uploadForm.addEventListener('submit', function() {
+        uploadForm.addEventListener('submit', function () {
             submitBtn.disabled = true;
             submitBtn.textContent = '처리 중...';
             loadingIndicator.classList.add('active');
@@ -322,7 +640,7 @@
                 bar.style.width = percent + '%';
                 bar.style.background = percent >= 100 ? '#dc3545' : percent >= 80 ? '#ffc107' : '#28a745';
             })
-            .catch(() => {});
+            .catch(() => { });
 
         const dropzone = document.getElementById('dropzone');
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(event => {
@@ -360,7 +678,7 @@
         }
 
         // 모달 바깥 클릭 시 닫기
-        document.getElementById('addressModal').addEventListener('click', function(e) {
+        document.getElementById('addressModal').addEventListener('click', function (e) {
             if (e.target === this) closeAddressSearch();
         });
 
@@ -395,16 +713,16 @@
                 resultsDiv.innerHTML =
                     '<div class="search-status">도로명주소 검색 결과가 없습니다.</div>' +
                     '<div class="naver-fallback">' +
-                        '<p>시골 지역이나 상세 주소는 네이버지도에서 검색해보세요.</p>' +
-                        '<a class="btn-naver" href="' + naverUrl + '" target="_blank" rel="noopener">' +
-                            '네이버지도에서 검색' +
-                        '</a>' +
-                        '<div class="manual-input-group">' +
-                            '<input type="text" id="manualAddressInput" ' +
-                                'placeholder="네이버지도에서 찾은 주소를 입력하세요"' +
-                                ' onkeydown="if(event.key===\'Enter\') applyManualAddress()">' +
-                            '<button type="button" class="btn-manual-apply" onclick="applyManualAddress()">적용</button>' +
-                        '</div>' +
+                    '<p>시골 지역이나 상세 주소는 네이버지도에서 검색해보세요.</p>' +
+                    '<a class="btn-naver" href="' + naverUrl + '" target="_blank" rel="noopener">' +
+                    '네이버지도에서 검색' +
+                    '</a>' +
+                    '<div class="manual-input-group">' +
+                    '<input type="text" id="manualAddressInput" ' +
+                    'placeholder="네이버지도에서 찾은 주소를 입력하세요"' +
+                    ' onkeydown="if(event.key===\'Enter\') applyManualAddress()">' +
+                    '<button type="button" class="btn-manual-apply" onclick="applyManualAddress()">적용</button>' +
+                    '</div>' +
                     '</div>';
                 document.getElementById('searchPagination').style.display = 'none';
                 return;
@@ -413,11 +731,11 @@
             let html = '';
             data.addresses.forEach(addr => {
                 html += '<div class="search-result-item" onclick="selectAddress(this)" ' +
-                        'data-road="' + escapeHtml(addr.roadAddr) + '">' +
+                    'data-road="' + escapeHtml(addr.roadAddr) + '">' +
                     '<div class="search-result-road">' + escapeHtml(addr.roadAddr) + '</div>' +
                     '<div class="search-result-jibun">[지번] ' + escapeHtml(addr.jibunAddr) + '</div>' +
                     '<div class="search-result-zip">[우편번호] ' + escapeHtml(addr.zipNo) + '</div>' +
-                '</div>';
+                    '</div>';
             });
 
             // 검색 결과가 있어도 네이버지도 링크 제공
@@ -425,15 +743,15 @@
             html += '<div class="naver-fallback">' +
                 '<p>원하는 주소가 없나요?</p>' +
                 '<a class="btn-naver" href="' + naverUrl + '" target="_blank" rel="noopener">' +
-                    '네이버지도에서 검색' +
+                '네이버지도에서 검색' +
                 '</a>' +
                 '<div class="manual-input-group">' +
-                    '<input type="text" id="manualAddressInput" ' +
-                        'placeholder="주소를 직접 입력하세요"' +
-                        ' onkeydown="if(event.key===\'Enter\') applyManualAddress()">' +
-                    '<button type="button" class="btn-manual-apply" onclick="applyManualAddress()">적용</button>' +
+                '<input type="text" id="manualAddressInput" ' +
+                'placeholder="주소를 직접 입력하세요"' +
+                ' onkeydown="if(event.key===\'Enter\') applyManualAddress()">' +
+                '<button type="button" class="btn-manual-apply" onclick="applyManualAddress()">적용</button>' +
                 '</div>' +
-            '</div>';
+                '</div>';
 
             resultsDiv.innerHTML = html;
 
@@ -525,6 +843,53 @@
             div.textContent = str;
             return div.innerHTML;
         }
+
+        function deleteOrder(btn) {
+            if (!confirm('이 주문 정보를 목록에서 삭제하시겠습니까?')) return;
+            const index = parseInt(btn.getAttribute('data-index'));
+            const jsonInput = document.getElementById('ordersJsonInput');
+            const existingOrdersJsonInput = document.getElementById('existingOrdersJsonInput');
+
+            if (jsonInput) {
+                try {
+                    let orders = JSON.parse(jsonInput.value);
+                    orders.splice(index, 1);
+                    const newJson = JSON.stringify(orders);
+
+                    jsonInput.value = newJson;
+                    if (existingOrdersJsonInput) {
+                        existingOrdersJsonInput.value = newJson;
+                    }
+
+                    const row = document.querySelector('tr[data-index="' + index + '"]');
+                    if (row) row.remove();
+
+                    const tbody = document.querySelector('#resultTable tbody');
+                    Array.from(tbody.querySelectorAll('tr')).forEach((tr, i) => {
+                        tr.setAttribute('data-index', i);
+                        tr.querySelector('td:first-child').textContent = i + 1;
+
+                        const searchBtn = tr.querySelector('.btn-search');
+                        if (searchBtn) searchBtn.setAttribute('data-index', i);
+
+                        const delBtn = tr.querySelector('.btn-delete');
+                        if (delBtn) delBtn.setAttribute('data-index', i);
+                    });
+
+                    const totalStrong = document.querySelector('.alert-success strong');
+                    if (totalStrong) totalStrong.textContent = orders.length;
+
+                    if (orders.length === 0) {
+                        document.querySelector('.result-table').closest('.card').style.display = 'none';
+                        if (existingOrdersJsonInput) existingOrdersJsonInput.remove();
+                    }
+                } catch (e) {
+                    console.error('삭제 중 오류:', e);
+                    alert('삭제 중 오류가 발생했습니다.');
+                }
+            }
+        }
     </script>
 </body>
+
 </html>
