@@ -600,9 +600,9 @@
                     <tr>
                         <th style="width: 40px; text-align: center;">순서</th>
                         <th style="width: 50px;">No.</th>
-                        <th>이름</th>
-                        <th>주소</th>
-                        <th>전화번호</th>
+                        <th style="width: 15%;">이름</th>
+                        <th style="width: 50%;">주소</th>
+                        <th style="width: 15%;">전화번호</th>
                         <th style="width: 60px;">관리</th>
                     </tr>
                 </thead>
@@ -621,7 +621,8 @@
                             <div class="address-cell">
                                 <input type="text" class="edit-input address-text" th:value="${order.address}"
                                     th:style="${order.addressValid == false ? 'color: red; font-weight: bold;' : ''}"
-                                    th:attr="data-index=${stat.index}, data-field='address'" onchange="updateOrderData(this)">
+                                    th:attr="data-index=${stat.index}, data-field='address'"
+                                    onchange="updateOrderData(this)">
                                 <button type="button" class="btn-search"
                                     th:attr="data-index=${stat.index},data-address=${order.address}"
                                     onclick="openAddressSearch(this)">
@@ -687,7 +688,7 @@
                     isSorting = true;
                     // 새로 추가된 파일들을 accumulatedFiles에 누적 (중복 방지)
                     Array.from(this.files).forEach(newFile => {
-                        const exists = Array.from(accumulatedFiles.files).some(existing => 
+                        const exists = Array.from(accumulatedFiles.files).some(existing =>
                             existing.name === newFile.name && existing.size === newFile.size
                         );
                         if (!exists) {
