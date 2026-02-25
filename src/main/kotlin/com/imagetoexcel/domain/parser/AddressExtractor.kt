@@ -6,7 +6,13 @@ class AddressExtractor {
 
     private val addressSuffixes =
             Regex("[가-힣][시군구읍면동리로길]|[가-힣]\\d+[로길]|\\d+[호층]|번지|아파트|빌라|오피스텔|APT")
-    private val roadNamePattern = Regex("[가-힣]{2,}\\s*\\d*(?:번)?[로길](?:$|\\s|,)")
+
+    // 도로명 패턴 보강: 띄어쓰기 유무 상관없이 "로"나 "길" 바로 뒤에 숫자가 올 수 있도록 (예: 지제동삭2로177)
+    private val roadNamePattern =
+            Regex("[가-힣]{2,}\\s*\\d*(?:번)?[로길](?:\\s*\\d{1,4}(?:-\\d{1,4})?)?(?:$|\\s|,)")
+
+    // 붙여쓰기 주소에서 특정 동/호수를 자르기보다, 도로명 API 검색용 + 부속 주소를 그대로 살리는 정규식 결합용
+    private val tightRoadAndNumber = Regex("([가-힣]+(?:로|길))\\s*(\\d{1,4}(?:-\\d{1,4})?)")
 
     // 건물번호 패턴: 최대 4자리 (5자리는 우편번호 → 제외)
     // 예: "80" ✓, "10-12" ✓, "428-20" ✓, "<99 103>" 같이 숫자가 여러개여도 마지막 숫자 등 노이즈 허용
@@ -21,6 +27,10 @@ class AddressExtractor {
     private val jibunPattern = Regex("[가-힣]{2,}(?:동|읍|면|리)\\s*\\d{1,5}(?:-\\d{1,5})?")
 
     fun extract(lines: List<String>): String {
+        // 외국어(특히 태국어)가 포함된 텍스트 블록은 주소로 취급하지 않음
+        val cleanLines = lines.filter { !containsThaiScript(it) }
+        if (cleanLines.isEmpty()) return ""
+
         // 0단계: 파란색 건물 번호판 (카메라 앱의 상단 GPS 주소보다 실제 사물 우선)
         // 줄 전체가 "오직 도로명"으로만 끝나는 경우 (예: "대송4길", "원고매로2번길")
         val pureRoadName = Regex("^[a-zA-Z가-힣\\s]*[가-힣]{2,}\\s*\\d*(?:번)?[로길]$")
@@ -54,7 +64,19 @@ class AddressExtractor {
             }
         }
 
-        // 1단계: 지역 키워드 기반 여러 줄 결합
+        // 1-5단계: 지역 키워드 기반 여러 줄 결합 / 띄어쓰기가 아예 없는 주소("경기도 평택시지제동삭2로177 더샾...")
+        // 띄어쓰기가 없는 주소는 1줄에 모든 정보(시도 + 로/길 + 번지수 + 상세주소)가 함축되어 있음
+        for (line in cleanLines) {
+            val hasKeyword = KoreanRegion.containsAny(line)
+            val hasTightRoad = tightRoadAndNumber.containsMatchIn(line)
+            if (hasKeyword && hasTightRoad) {
+                // 도로명 API 검색이 가능하도록 지역 키워드와 도로명+번지수가 한 줄에 있으면 즉시 통째로 반환 (상세주소 보존)
+                // OCR이 띄어쓰기를 무시하고 하나로 뭉쳐낸 경우를 구제함
+                return line
+            }
+        }
+
+        // 1단계: 기존 지역 키워드 기반 여러 줄 결합
         val addressLines = mutableListOf<String>()
         var foundAddress = false
 
@@ -164,6 +186,10 @@ class AddressExtractor {
                 lower.contains("heungcheon") ||
                 lower.contains("yeoju") ||
                 lower.contains("daesong")
+    }
+
+    private fun containsThaiScript(text: String): Boolean {
+        return text.any { char -> char in '\u0E00'..'\u0E7F' }
     }
 
     private fun Char.isKorean(): Boolean = this in '\uAC00'..'\uD7A3'
