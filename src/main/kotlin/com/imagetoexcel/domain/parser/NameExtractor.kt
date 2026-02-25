@@ -43,6 +43,7 @@ class NameExtractor {
 
         // 후보 수집
         data class Candidate(val name: String, val lineIndex: Int, val isFullLine: Boolean)
+
         val candidates = mutableListOf<Candidate>()
 
         for ((index, line) in lines.withIndex()) {
@@ -54,14 +55,20 @@ class NameExtractor {
             if (englishNamePattern.matches(line)) {
                 val name = line.trim()
                 val words = name.split("\\s+".toRegex())
-                if (words.none { it in excludeWords } && name.toSet().count { !it.isWhitespace() } >= 2) {
-                    candidates.add(Candidate(name, index, true))
+                if (words.none { it in excludeWords } &&
+                    name.toSet().count { !it.isWhitespace() } >= 2
+                ) {
+                    if (!containsThaiScript(name)) {
+                        candidates.add(Candidate(name, index, true))
+                    }
                 }
             } else {
                 val match = singleNamePattern.find(line) ?: continue
                 val name = match.groupValues[1]
                 if (name !in excludeWords) {
-                    candidates.add(Candidate(name, index, false))
+                    if (!containsThaiScript(name)) {
+                        candidates.add(Candidate(name, index, false))
+                    }
                 }
             }
         }
@@ -71,12 +78,13 @@ class NameExtractor {
         // 2순위: 전화번호 근처 본문 이름 (±4줄 이내)
         if (phoneLineIndex >= 0) {
             val bodyRange = 4
-            val bodyCandidates = candidates
-                .filter { abs(it.lineIndex - phoneLineIndex) <= bodyRange }
-                .sortedWith(
-                    compareBy<Candidate> { abs(it.lineIndex - phoneLineIndex) }
-                        .thenByDescending { it.isFullLine }
-                )
+            val bodyCandidates =
+                candidates
+                    .filter { abs(it.lineIndex - phoneLineIndex) <= bodyRange }
+                    .sortedWith(
+                        compareBy<Candidate> { abs(it.lineIndex - phoneLineIndex) }
+                            .thenByDescending { it.isFullLine }
+                    )
 
             if (bodyCandidates.isNotEmpty()) {
                 return bodyCandidates.first().name
@@ -84,9 +92,10 @@ class NameExtractor {
 
             // 본문에 이름 없음 → 외국어 콘텐츠여도 상단 5줄에 2단어 이름 후보 있으면 우선
             // 예: "KhmKrich ThongNok", "iLai Chaitawong" (OCR이 첫 글자 잘린 경우 포함)
-            val topCandidates = candidates
-                .filter { it.lineIndex < 5 && it.isFullLine }
-                .filter { it.name.trim().split("\\s+".toRegex()).size >= 2 }
+            val topCandidates =
+                candidates.filter { it.lineIndex < 5 && it.isFullLine }.filter {
+                    it.name.trim().split("\\s+".toRegex()).size >= 2
+                }
             if (topCandidates.isNotEmpty()) return topCandidates.first().name
 
             if (hasForeignScript(lines)) return "외국인"
@@ -107,18 +116,24 @@ class NameExtractor {
 
     private fun isAddressRomanization(line: String): Boolean {
         val lower = line.lowercase()
-        return lower.contains("-gil") || lower.contains("-ro ") ||
-                lower.contains("-dong") || lower.contains("beon-gil") ||
+        return lower.contains("-gil") ||
+                lower.contains("-ro ") ||
+                lower.contains("-dong") ||
+                lower.contains("beon-gil") ||
                 lower.contains("-daero")
+    }
+
+    private fun containsThaiScript(text: String): Boolean {
+        return text.any { char -> char in '\u0E00'..'\u0E7F' }
     }
 
     private fun hasForeignScript(lines: List<String>): Boolean {
         return lines.any { line ->
             line.any { char ->
                 char in '\u0E00'..'\u0E7F' ||  // Thai
-                char in '\u1780'..'\u17FF' ||  // Khmer
-                char in '\u1000'..'\u109F' ||  // Myanmar
-                char in '\u0E80'..'\u0EFF'     // Lao
+                        char in '\u1780'..'\u17FF' ||  // Khmer
+                        char in '\u1000'..'\u109F' ||  // Myanmar
+                        char in '\u0E80'..'\u0EFF'     // Lao
             }
         }
     }

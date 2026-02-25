@@ -487,6 +487,60 @@
         .btn-manual-apply:hover {
             background: #e8590c;
         }
+
+        /* 편집 및 드래그 앤 드롭 스타일 */
+        .edit-input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            font-size: 1rem;
+            background: transparent;
+            transition: all 0.2s;
+        }
+
+        .edit-input:hover {
+            border-color: #ddd;
+            background: #fff;
+        }
+
+        .edit-input:focus {
+            outline: none;
+            border-color: #007bff;
+            background: #fff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, .25);
+        }
+
+        .result-table tbody tr {
+            transition: background-color 0.2s;
+        }
+
+        .result-table tbody tr.dragging {
+            opacity: 0.5;
+            background-color: #f8f9fa;
+        }
+
+        .result-table tbody tr.drag-over {
+            border-top: 2px solid #007bff;
+        }
+
+        .drag-handle {
+            cursor: grab;
+            color: #ccc;
+            user-select: none;
+            display: inline-block;
+            transition: color 0.2s;
+            font-size: 1.2rem;
+            text-align: center;
+        }
+
+        .drag-handle:hover {
+            color: #666;
+        }
+
+        .drag-handle:active {
+            cursor: grabbing;
+        }
     </style>
 </head>
 
@@ -544,6 +598,7 @@
             <table class="result-table" id="resultTable">
                 <thead>
                     <tr>
+                        <th style="width: 40px; text-align: center;">순서</th>
                         <th style="width: 50px;">No.</th>
                         <th>이름</th>
                         <th>주소</th>
@@ -551,10 +606,17 @@
                         <th style="width: 60px;">관리</th>
                     </tr>
                 </thead>
-                <tbody>
-                    <tr th:each="order, stat : ${orders}" th:attr="data-index=${stat.index}">
-                        <td th:text="${stat.index + 1}">1</td>
-                        <td th:text="${order.name}">Name</td>
+                <tbody id="resultTableBody">
+                    <tr th:each="order, stat : ${orders}" th:attr="data-index=${stat.index}" draggable="true"
+                        ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)"
+                        ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)"
+                        ondragend="handleDragEnd(event)">
+                        <td style="text-align: center;"><span class="drag-handle" title="드래그하여 순서 변경">☰</span></td>
+                        <td class="row-num" th:text="${stat.index + 1}">1</td>
+                        <td>
+                            <input type="text" class="edit-input" th:value="${order.name}"
+                                th:attr="data-index=${stat.index}, data-field='name'" onchange="updateOrderData(this)">
+                        </td>
                         <td>
                             <div class="address-cell">
                                 <span class="address-text" th:text="${order.address}">Address</span>
@@ -565,7 +627,10 @@
                                 </button>
                             </div>
                         </td>
-                        <td th:text="${order.phone}">Phone</td>
+                        <td>
+                            <input type="text" class="edit-input" th:value="${order.phone}"
+                                th:attr="data-index=${stat.index}, data-field='phone'" onchange="updateOrderData(this)">
+                        </td>
                         <td>
                             <button type="button" class="btn-delete" th:attr="data-index=${stat.index}"
                                 onclick="deleteOrder(this)">삭제</button>
@@ -610,8 +675,23 @@
         const uploadForm = document.getElementById('uploadForm');
         const loadingIndicator = document.getElementById('loadingIndicator');
 
+        let isSorting = false;
         fileInput.addEventListener('change', function () {
+            if (isSorting) return;
             if (this.files.length > 0) {
+                try {
+                    isSorting = true;
+                    // 첫 번째로 다운받은 파일(생성/수정일이 가장 오래된 파일)이 먼저 오도록 정렬 (오름차순)
+                    const dt = new DataTransfer();
+                    const sortedFiles = Array.from(this.files).sort((a, b) => a.lastModified - b.lastModified);
+                    sortedFiles.forEach(f => dt.items.add(f));
+                    this.files = dt.files;
+                } catch (err) {
+                    console.error('File sort failed:', err);
+                } finally {
+                    isSorting = false;
+                }
+
                 const count = this.files.length;
                 const names = Array.from(this.files).map(f => f.name).join(', ');
                 dropzoneText.innerHTML =
@@ -864,17 +944,9 @@
                     const row = document.querySelector('tr[data-index="' + index + '"]');
                     if (row) row.remove();
 
-                    const tbody = document.querySelector('#resultTable tbody');
-                    Array.from(tbody.querySelectorAll('tr')).forEach((tr, i) => {
-                        tr.setAttribute('data-index', i);
-                        tr.querySelector('td:first-child').textContent = i + 1;
+                    const tbody = document.getElementById('resultTableBody');
 
-                        const searchBtn = tr.querySelector('.btn-search');
-                        if (searchBtn) searchBtn.setAttribute('data-index', i);
-
-                        const delBtn = tr.querySelector('.btn-delete');
-                        if (delBtn) delBtn.setAttribute('data-index', i);
-                    });
+                    reindexRows();
 
                     const totalStrong = document.querySelector('.alert-success strong');
                     if (totalStrong) totalStrong.textContent = orders.length;
@@ -888,6 +960,160 @@
                     alert('삭제 중 오류가 발생했습니다.');
                 }
             }
+        }
+
+        // === 데이터 수정 로직 ===
+        function updateOrderData(input) {
+            const index = parseInt(input.getAttribute('data-index'));
+            const field = input.getAttribute('data-field');
+            const value = input.value.trim();
+
+            const jsonInput = document.getElementById('ordersJsonInput');
+            const existingOrdersJsonInput = document.getElementById('existingOrdersJsonInput');
+
+            if (jsonInput) {
+                try {
+                    const orders = JSON.parse(jsonInput.value);
+                    if (orders[index]) {
+                        orders[index][field] = value;
+                        const newJson = JSON.stringify(orders);
+                        jsonInput.value = newJson;
+                        if (existingOrdersJsonInput) {
+                            existingOrdersJsonInput.value = newJson;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Data update failed:', e);
+                }
+            }
+        }
+
+        // === 드래그 앤 드롭 로직 ===
+        let draggedRowIndex = null;
+
+        function handleDragStart(e) {
+            const tr = e.target.closest('tr');
+            draggedRowIndex = parseInt(tr.getAttribute('data-index'));
+            tr.classList.add('dragging');
+
+            // 필수 드래그 데이터 설정
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', draggedRowIndex);
+
+            // 빈 이미지 설정 시 drag image를 감추지 못해 약간 깜빡일 수 있으므로 그대로 두되, 
+            // 원하는 경우 event.dataTransfer.setDragImage() 사용 가능
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault(); // drop 허용
+            e.dataTransfer.dropEffect = 'move';
+
+            const tr = e.target.closest('tr');
+            if (tr && !tr.classList.contains('dragging')) {
+                tr.classList.add('drag-over');
+            }
+            return false;
+        }
+
+        function handleDragLeave(e) {
+            const tr = e.target.closest('tr');
+            if (tr) {
+                tr.classList.remove('drag-over');
+            }
+        }
+
+        function handleDragEnd(e) {
+            const tr = e.target.closest('tr');
+            if (tr) {
+                tr.classList.remove('dragging');
+            }
+            document.querySelectorAll('.result-table tbody tr').forEach(row => {
+                row.classList.remove('drag-over');
+            });
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const tr = e.target.closest('tr');
+            if (tr) {
+                tr.classList.remove('drag-over');
+            }
+
+            if (!tr) return false;
+
+            const dropTargetIndex = parseInt(tr.getAttribute('data-index'));
+
+            if (draggedRowIndex === null || dropTargetIndex === null || draggedRowIndex === dropTargetIndex || isNaN(draggedRowIndex) || isNaN(dropTargetIndex)) {
+                draggedRowIndex = null;
+                return false;
+            }
+
+            // 배열 데이터 순서 변경
+            const jsonInput = document.getElementById('ordersJsonInput');
+            const existingOrdersJsonInput = document.getElementById('existingOrdersJsonInput');
+
+            if (jsonInput) {
+                try {
+                    let orders = JSON.parse(jsonInput.value);
+
+                    // 이동할 항목 추출 및 새 위치에 삽입
+                    const draggedItem = orders.splice(draggedRowIndex, 1)[0];
+                    orders.splice(dropTargetIndex, 0, draggedItem);
+
+                    const newJson = JSON.stringify(orders);
+                    jsonInput.value = newJson;
+                    if (existingOrdersJsonInput) {
+                        existingOrdersJsonInput.value = newJson;
+                    }
+
+                    // DOM 행 순서 변경
+                    const tbody = document.getElementById('resultTableBody');
+                    const rows = Array.from(tbody.querySelectorAll('tr'));
+                    const draggedRow = rows.find(r => parseInt(r.getAttribute('data-index')) === parseInt(draggedRowIndex));
+                    const targetRow = rows.find(r => parseInt(r.getAttribute('data-index')) === parseInt(dropTargetIndex));
+
+                    if (draggedRow && targetRow) {
+                        if (draggedRowIndex < dropTargetIndex) {
+                            targetRow.after(draggedRow);
+                        } else {
+                            targetRow.before(draggedRow);
+                        }
+
+                        // 인덱스 및 번호 재정렬
+                        reindexRows();
+                    }
+
+                } catch (err) {
+                    console.error('Drop handling failed:', err);
+                }
+            }
+            draggedRowIndex = null;
+            return false;
+        }
+
+        function reindexRows() {
+            const tbody = document.getElementById('resultTableBody');
+            Array.from(tbody.querySelectorAll('tr')).forEach((tr, i) => {
+                tr.setAttribute('data-index', i);
+
+                const numCell = tr.querySelector('.row-num');
+                if (numCell) numCell.textContent = i + 1;
+
+                // 입력 필드 인덱스 업데이트
+                tr.querySelectorAll('.edit-input').forEach(input => {
+                    input.setAttribute('data-index', i);
+                });
+
+                // 주소 검색 버튼 인덱스 업데이트
+                const searchBtn = tr.querySelector('.btn-search');
+                if (searchBtn) searchBtn.setAttribute('data-index', i);
+
+                // 삭제 버튼 인덱스 업데이트
+                const delBtn = tr.querySelector('.btn-delete');
+                if (delBtn) delBtn.setAttribute('data-index', i);
+            });
         }
     </script>
 </body>

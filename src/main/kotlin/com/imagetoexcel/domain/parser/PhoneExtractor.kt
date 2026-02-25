@@ -4,10 +4,8 @@ data class PhoneResult(val phone: String, val lineIndex: Int)
 
 class PhoneExtractor {
 
-    private val phonePatterns = listOf(
-        Regex("(01[016789][-\\s]?\\d{3,4}[-\\s]?\\d{4})"),
-        Regex("(01[016789]\\d{7,8})")
-    )
+    private val phonePatterns =
+        listOf(Regex("(01[016789][-\\s]?\\d{3,4}[-\\s]?\\d{4})"), Regex("(01[016789]\\d{7,8})"))
 
     fun extract(lines: List<String>): PhoneResult {
         // 1단계: 단일 줄에서 전화번호 검색 (가장 일반적인 경우)
@@ -32,7 +30,13 @@ class PhoneExtractor {
             val match = pattern.find(text) ?: continue
             val digits = match.groupValues[1].replace(Regex("[^0-9]"), "")
             if (digits.length in 10..11) {
-                return PhoneResult(phone = digits, lineIndex = lineIndex)
+                val formatted =
+                    if (digits.length == 11) {
+                        "${digits.substring(0, 3)}-${digits.substring(3, 7)}-${digits.substring(7)}"
+                    } else {
+                        "${digits.substring(0, 3)}-${digits.substring(3, 6)}-${digits.substring(6)}"
+                    }
+                return PhoneResult(phone = formatted, lineIndex = lineIndex)
             }
         }
         return null

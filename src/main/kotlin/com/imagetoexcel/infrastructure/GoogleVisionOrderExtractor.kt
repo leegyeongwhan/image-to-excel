@@ -8,6 +8,8 @@ import com.imagetoexcel.domain.OrderTextParser
 import com.imagetoexcel.domain.enum.GoogleApiError
 import com.imagetoexcel.dto.OrderData
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.util.Base64
+import kotlin.collections.get
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -20,15 +22,14 @@ import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
 import org.springframework.web.client.RestTemplate
 import org.springframework.web.multipart.MultipartFile
-import java.util.Base64
-import kotlin.collections.get
 
 @Component
 class GoogleVisionOrderExtractor(
     private val restTemplate: RestTemplate,
     private val properties: GoogleVisionProperties,
     private val orderProperties: OrderProperties,
-    private val apiUsageTracker: ApiUsageTracker
+    private val apiUsageTracker: ApiUsageTracker,
+    private val imagePreprocessor: ImagePreprocessor
 ) : OrderExtractor {
 
     private val logger = KotlinLogging.logger {}
@@ -43,7 +44,8 @@ class GoogleVisionOrderExtractor(
             throw OrderException.ApiKeyNotConfigured()
         }
 
-        val base64Image = Base64.getEncoder().encodeToString(file.bytes)
+        val processedImageBytes = imagePreprocessor.preprocess(file)
+        val base64Image = Base64.getEncoder().encodeToString(processedImageBytes)
         val ocrText = callGoogleVision(base64Image)
         logger.info { "OCR 결과:\n$ocrText" }
         val orderData = parser.parse(ocrText)
@@ -61,43 +63,48 @@ class GoogleVisionOrderExtractor(
         logger.info { "병렬 처리 시작: ${files.size}개 이미지 (동시 ${MAX_CONCURRENT_CALLS}개)" }
         return runBlocking(Dispatchers.IO) {
             val semaphore = Semaphore(MAX_CONCURRENT_CALLS)
-            files.map { file ->
-                async {
-                    semaphore.withPermit {
-                        try {
-                            extractOrderData(file)
-                        } catch (e: OrderException) {
-                            logger.error(e) { "이미지 처리 실패: ${file.originalFilename}" }
-                            OrderData(
-                                name = "ERROR: ${file.originalFilename}",
-                                address = "처리 실패: ${e.message}"
-                            )
+            files
+                .map { file ->
+                    async {
+                        semaphore.withPermit {
+                            try {
+                                extractOrderData(file)
+                            } catch (e: OrderException) {
+                                logger.error(e) { "이미지 처리 실패: ${file.originalFilename}" }
+                                OrderData(
+                                    name = "ERROR: ${file.originalFilename}",
+                                    address = "처리 실패: ${e.message}"
+                                )
+                            }
                         }
                     }
                 }
-            }.awaitAll()
+                .awaitAll()
         }
     }
 
     private fun callGoogleVision(base64Image: String): String {
-        val requestBody = mapOf(
-            "requests" to listOf(
-                mapOf(
-                    "image" to mapOf("content" to base64Image),
-                    "features" to listOf(
-                        mapOf("type" to "DOCUMENT_TEXT_DETECTION")
-                    ),
-                    // 한국어+태국어 힌트: 파란 채팅버블/위치카드처럼 배경이 복잡해도 한글 인식률 향상
-                    "imageContext" to mapOf(
-                        "languageHints" to listOf("ko", "th")
-                    )
-                )
+        val requestBody =
+            mapOf(
+                "requests" to
+                        listOf(
+                            mapOf(
+                                "image" to mapOf("content" to base64Image),
+                                "features" to
+                                        listOf(
+                                            mapOf(
+                                                "type" to
+                                                        "DOCUMENT_TEXT_DETECTION"
+                                            )
+                                        ),
+                                // 한국어+태국어 힌트: 파란 채팅버블/위치카드처럼 배경이 복잡해도 한글 인식률 향상
+                                "imageContext" to
+                                        mapOf("languageHints" to listOf("ko", "th"))
+                            )
+                        )
             )
-        )
 
-        val headers = HttpHeaders().apply {
-            contentType = MediaType.APPLICATION_JSON
-        }
+        val headers = HttpHeaders().apply { contentType = MediaType.APPLICATION_JSON }
 
         val url = "${properties.apiUrl}?key=${properties.apiKey}"
         val entity = HttpEntity(requestBody, headers)
@@ -108,7 +115,10 @@ class GoogleVisionOrderExtractor(
         return extractText(response)
     }
 
-    private fun executeApiCall(url: String, entity: HttpEntity<Map<String, List<Map<String, Any>>>>): Map<*, *> {
+    private fun executeApiCall(
+        url: String,
+        entity: HttpEntity<Map<String, List<Map<String, Any>>>>
+    ): Map<*, *> {
         val maxRetries = 3
         var lastException: Exception? = null
 
@@ -123,12 +133,18 @@ class GoogleVisionOrderExtractor(
                     lastException = e
                     Thread.sleep(1000L * (1 shl attempt))
                 } else {
-                    logger.error { "Google Vision API 호출 실패 (HTTP $status): ${e.responseBodyAsString}" }
-                    throw OrderException.VisionApiErrorWithDetail(GoogleApiError.userMessageForStatus(status))
+                    logger.error {
+                        "Google Vision API 호출 실패 (HTTP $status): ${e.responseBodyAsString}"
+                    }
+                    throw OrderException.VisionApiErrorWithDetail(
+                        GoogleApiError.userMessageForStatus(status)
+                    )
                 }
             } catch (e: HttpServerErrorException) {
                 val status = e.statusCode.value()
-                logger.warn { "Google Vision API 서버 오류 (HTTP $status), 재시도 ${attempt + 1}/$maxRetries" }
+                logger.warn {
+                    "Google Vision API 서버 오류 (HTTP $status), 재시도 ${attempt + 1}/$maxRetries"
+                }
                 lastException = e
                 Thread.sleep(1000L * (1 shl attempt))
             } catch (e: ResourceAccessException) {
@@ -138,13 +154,19 @@ class GoogleVisionOrderExtractor(
             }
         }
 
-        when (lastException) {
-            is HttpClientErrorException -> throw OrderException.VisionApiErrorWithDetail(GoogleApiError.RATE_LIMIT.message)
+        val finalException = lastException
+        when (finalException) {
+            is HttpClientErrorException ->
+                throw OrderException.VisionApiErrorWithDetail(GoogleApiError.RATE_LIMIT.message)
+
             is HttpServerErrorException -> {
-                val status = (lastException as HttpServerErrorException).statusCode.value()
-                throw OrderException.VisionApiErrorWithDetail("Google API 서버 오류 (HTTP $status). 잠시 후 다시 시도해주세요.")
+                val status = finalException.statusCode.value()
+                throw OrderException.VisionApiErrorWithDetail(
+                    "Google API 서버 오류 (HTTP $status). 잠시 후 다시 시도해주세요."
+                )
             }
-            is ResourceAccessException -> throw OrderException.NetworkError(lastException)
+
+            is ResourceAccessException -> throw OrderException.NetworkError(finalException)
             else -> throw OrderException.VisionApiErrorWithDetail("알 수 없는 오류가 발생했습니다.")
         }
     }
@@ -159,11 +181,13 @@ class GoogleVisionOrderExtractor(
 
     @Suppress("UNCHECKED_CAST")
     private fun extractText(response: Map<*, *>): String {
-        val responses = response["responses"] as? List<Map<String, Any>>
-            ?: throw OrderException.VisionApiError(GoogleApiError.INVALID_FORMAT)
+        val responses =
+            response["responses"] as? List<Map<String, Any>>
+                ?: throw OrderException.VisionApiError(GoogleApiError.INVALID_FORMAT)
 
-        val firstResponse = responses.firstOrNull()
-            ?: throw OrderException.VisionApiError(GoogleApiError.EMPTY_RESPONSE)
+        val firstResponse =
+            responses.firstOrNull()
+                ?: throw OrderException.VisionApiError(GoogleApiError.EMPTY_RESPONSE)
 
         val responseError = firstResponse["error"] as? Map<*, *>
         if (responseError != null) {
