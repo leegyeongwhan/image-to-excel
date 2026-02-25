@@ -13,10 +13,10 @@ import org.springframework.web.multipart.MultipartFile
 
 @Service
 class UploadService(
-    private val orderExtractor: OrderExtractor,
-    private val orderExcelGenerator: OrderExcelGenerator,
-    private val addressEnrichService: AddressEnrichService,
-    private val objectMapper: ObjectMapper
+        private val orderExtractor: OrderExtractor,
+        private val orderExcelGenerator: OrderExcelGenerator,
+        private val addressEnrichService: AddressEnrichService,
+        private val objectMapper: ObjectMapper
 ) {
 
     companion object {
@@ -31,13 +31,17 @@ class UploadService(
     private fun enrichAddressesBatch(orders: List<OrderData>): List<OrderData> {
         return runBlocking(Dispatchers.IO) {
             val semaphore = Semaphore(MAX_CONCURRENT_JUSO_CALLS)
-            orders.map { order ->
-                async {
-                    semaphore.withPermit {
-                        order.copy(address = addressEnrichService.enrich(order.address))
+            orders
+                    .map { order ->
+                        async {
+                            semaphore.withPermit {
+                                val (enrichedAddress, isValid) =
+                                        addressEnrichService.enrich(order.address)
+                                order.copy(address = enrichedAddress, addressValid = isValid)
+                            }
+                        }
                     }
-                }
-            }.awaitAll()
+                    .awaitAll()
         }
     }
 

@@ -619,7 +619,9 @@
                         </td>
                         <td>
                             <div class="address-cell">
-                                <span class="address-text" th:text="${order.address}">Address</span>
+                                <input type="text" class="edit-input address-text" th:value="${order.address}"
+                                    th:style="${order.addressValid == false ? 'color: red; font-weight: bold;' : ''}"
+                                    th:attr="data-index=${stat.index}, data-field='address'" onchange="updateOrderData(this)">
                                 <button type="button" class="btn-search"
                                     th:attr="data-index=${stat.index},data-address=${order.address}"
                                     onclick="openAddressSearch(this)">
@@ -675,19 +677,33 @@
         const uploadForm = document.getElementById('uploadForm');
         const loadingIndicator = document.getElementById('loadingIndicator');
 
+        const accumulatedFiles = new DataTransfer();
         let isSorting = false;
+
         fileInput.addEventListener('change', function () {
             if (isSorting) return;
             if (this.files.length > 0) {
                 try {
                     isSorting = true;
-                    // 첫 번째로 다운받은 파일(생성/수정일이 가장 오래된 파일)이 먼저 오도록 정렬 (오름차순)
-                    const dt = new DataTransfer();
-                    const sortedFiles = Array.from(this.files).sort((a, b) => a.lastModified - b.lastModified);
-                    sortedFiles.forEach(f => dt.items.add(f));
-                    this.files = dt.files;
+                    // 새로 추가된 파일들을 accumulatedFiles에 누적 (중복 방지)
+                    Array.from(this.files).forEach(newFile => {
+                        const exists = Array.from(accumulatedFiles.files).some(existing => 
+                            existing.name === newFile.name && existing.size === newFile.size
+                        );
+                        if (!exists) {
+                            accumulatedFiles.items.add(newFile);
+                        }
+                    });
+
+                    // 전체 누적된 파일들을 오름차순(오래된 파일 순) 정렬
+                    const sortedFiles = Array.from(accumulatedFiles.files).sort((a, b) => a.lastModified - b.lastModified);
+                    accumulatedFiles.items.clear();
+                    sortedFiles.forEach(f => accumulatedFiles.items.add(f));
+
+                    // input.files를 누적된 파일들로 교체
+                    this.files = accumulatedFiles.files;
                 } catch (err) {
-                    console.error('File sort failed:', err);
+                    console.error('File sort and accumulation failed:', err);
                 } finally {
                     isSorting = false;
                 }
@@ -861,7 +877,11 @@
             if (row) {
                 const addressText = row.querySelector('.address-text');
                 const searchBtn = row.querySelector('.btn-search');
-                if (addressText) addressText.textContent = roadAddr;
+                if (addressText) {
+                    addressText.value = roadAddr;
+                    addressText.style.color = '';
+                    addressText.style.fontWeight = 'normal';
+                }
                 if (searchBtn) searchBtn.setAttribute('data-address', roadAddr);
             }
 
@@ -897,7 +917,11 @@
             if (row) {
                 const addressText = row.querySelector('.address-text');
                 const searchBtn = row.querySelector('.btn-search');
-                if (addressText) addressText.textContent = addr;
+                if (addressText) {
+                    addressText.value = addr;
+                    addressText.style.color = '';
+                    addressText.style.fontWeight = 'normal';
+                }
                 if (searchBtn) searchBtn.setAttribute('data-address', addr);
             }
 

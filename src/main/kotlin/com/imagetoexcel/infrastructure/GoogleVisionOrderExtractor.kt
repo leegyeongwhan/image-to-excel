@@ -154,8 +154,7 @@ class GoogleVisionOrderExtractor(
             }
         }
 
-        val finalException = lastException
-        when (finalException) {
+        when (val finalException = lastException) {
             is HttpClientErrorException ->
                 throw OrderException.VisionApiErrorWithDetail(GoogleApiError.RATE_LIMIT.message)
 
