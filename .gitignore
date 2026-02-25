@@ -48,3 +48,5 @@ src/main/resources/templates/*.jpeg
 src/main/resources/templates/*.png
 src/main/resources/templates/*.gif
 src/main/resources/templates/*.webp
+src/main/resources/templates/*.jpg
+src/main/resources/templates/*.png

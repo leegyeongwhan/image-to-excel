@@ -37,29 +37,31 @@ class AddressExtractor {
         for ((index, line) in lines.withIndex()) {
             val trimmed = line.trim()
             if (pureRoadName.matches(trimmed) && trimmed.any { it.isKorean() }) {
-                // 위로 최대 5줄 거꾸로 탐색 (숫자가 먼저 잡혔을 가능성)
-                for (back in 1..5) {
-                    val prevIdx = index - back
-                    if (prevIdx < 0) break
-                    val prevLine = lines[prevIdx].trim()
-                    if (prevLine.length < 15 && numberPattern.matches(prevLine)) {
-                        // 노이즈를 제거하고 번지수만 추출
-                        val match = Regex("\\d{1,4}(-\\d{1,4})?").findAll(prevLine).lastOrNull()
-                        if (match != null) return "$trimmed ${match.value}"
-                    }
-                }
-                // 아래로 최대 3줄 탐색
+                // 아래로 최대 3줄 탐색 (번지수/번지가 다음 줄에 오는 것이 더 자연스러움 → 우선 탐색)
                 for (ahead in 1..3) {
                     val nextIdx = index + ahead
                     if (nextIdx >= lines.size) break
                     val nextLine = lines[nextIdx].trim()
                     if (nextLine.isEmpty() || isRomanization(nextLine) || nextLine.contains("우편번호"))
                             continue
+                    if (isCurrencyOrPriceLine(nextLine)) continue
                     if (nextLine.length < 15 && numberPattern.matches(nextLine)) {
                         val match = Regex("\\d{1,4}(-\\d{1,4})?").findAll(nextLine).lastOrNull()
                         if (match != null) return "$trimmed ${match.value}"
                     }
                     break
+                }
+                // 위로 최대 5줄 거꾸로 탐색 (숫자가 먼저 잡혔을 가능성)
+                for (back in 1..5) {
+                    val prevIdx = index - back
+                    if (prevIdx < 0) break
+                    val prevLine = lines[prevIdx].trim()
+                    if (isCurrencyOrPriceLine(prevLine)) continue
+                    if (prevLine.length < 15 && numberPattern.matches(prevLine)) {
+                        // 노이즈를 제거하고 번지수만 추출
+                        val match = Regex("\\d{1,4}(-\\d{1,4})?").findAll(prevLine).lastOrNull()
+                        if (match != null) return "$trimmed ${match.value}"
+                    }
                 }
             }
         }
@@ -70,9 +72,29 @@ class AddressExtractor {
             val hasKeyword = KoreanRegion.containsAny(line)
             val hasTightRoad = tightRoadAndNumber.containsMatchIn(line)
             if (hasKeyword && hasTightRoad) {
-                // 도로명 API 검색이 가능하도록 지역 키워드와 도로명+번지수가 한 줄에 있으면 즉시 통째로 반환 (상세주소 보존)
+                // 도로명 API 검색이 가능하도록 지역 키워드와 도로명+번지수가 한 줄에 있으면 통째로 반환 (상세주소 보존)
                 // OCR이 띄어쓰기를 무시하고 하나로 뭉쳐낸 경우를 구제함
-                return line
+
+                // 다음 줄에 층/호/동 상세주소가 있으면 append (예: "1층 102호", "204동 2402호")
+                val result = StringBuilder(line)
+                val originalIndex = lines.indexOf(line)
+                if (originalIndex >= 0) {
+                    val unitDetailPattern = Regex("\\d+[호층]|\\d+동\\s*\\d+호|\\d+BL|\\d+블록")
+                    for (ahead in 1..3) {
+                        val nextIdx = originalIndex + ahead
+                        if (nextIdx >= lines.size) break
+                        val nextLine = lines[nextIdx].trim()
+                        if (nextLine.isEmpty()) continue
+                        if (containsThaiScript(nextLine)) continue
+                        if (isCurrencyOrPriceLine(nextLine)) break
+                        if (unitDetailPattern.containsMatchIn(nextLine)) {
+                            result.append(" ").append(nextLine)
+                        } else {
+                            break
+                        }
+                    }
+                }
+                return result.toString()
             }
         }
 
@@ -106,7 +128,10 @@ class AddressExtractor {
                 val unitBeforePhone = Regex("^(\\d{1,4})\\s+01[016789]\\d{7,8}$").find(nextLine)
                 val hasUnitAlready = addressLines.joinToString("").contains(Regex("[호동층]"))
                 if (unitBeforePhone != null && !hasUnitAlready) {
-                    val unit = unitBeforePhone.groupValues[1]
+                    val rawUnit = unitBeforePhone.groupValues[1]
+                    // OCR이 "호"를 숫자("5" 등)로 오인 → 마지막 자리 제거하여 실제 호수 복원
+                    // 예: "1075" → "107", "2055" → "205"
+                    val unit = if (rawUnit.length >= 2) rawUnit.dropLast(1) else rawUnit
                     addressLines.add("${unit}호")
                 }
             }
@@ -130,11 +155,28 @@ class AddressExtractor {
         for ((index, line) in lines.withIndex()) {
             if (roadNamePattern.containsMatchIn(line) && line.any { it.isKorean() }) {
 
+                // 뒷 줄 최대 3줄 탐색 (로마자 병기 줄 건너뜀) — 순방향 우선
+                for (ahead in 1..3) {
+                    val nextIdx = index + ahead
+                    if (nextIdx >= lines.size) break
+                    val nextLine = lines[nextIdx].trim()
+                    if (isRomanization(nextLine)) continue // "Daesong 4-gil" 건너뜀
+                    if (isCurrencyOrPriceLine(nextLine)) continue
+                    if (nextLine.length < 15 && numberPattern.matches(nextLine)) {
+                        val onlyNumberMatch = Regex("\\d{1,4}(-\\d{1,4})?").find(nextLine)
+                        if (onlyNumberMatch != null) {
+                            return "$line ${onlyNumberMatch.value}" // "대송4길 80"
+                        }
+                    }
+                    break // 번지수도 로마자도 아니면 중단
+                }
+
                 // 앞(위)으로 최대 5줄 거꾸로 탐색 (OCR이 큰 번호를 먼저 읽는 현상 대응)
                 for (back in 1..5) {
                     val prevIdx = index - back
                     if (prevIdx < 0) break
                     val prevLine = lines[prevIdx].trim()
+                    if (isCurrencyOrPriceLine(prevLine)) continue
 
                     // 만약 너무 긴 텍스트거나 다른 한글 주소가 아닐 때 독립 숫자만 있다면
                     if (prevLine.length < 15 && numberPattern.matches(prevLine)) {
@@ -144,21 +186,6 @@ class AddressExtractor {
                             return "$line ${onlyNumberMatch.value}"
                         }
                     }
-                }
-
-                // 뒷 줄 최대 3줄 탐색 (로마자 병기 줄 건너뜀)
-                for (ahead in 1..3) {
-                    val nextIdx = index + ahead
-                    if (nextIdx >= lines.size) break
-                    val nextLine = lines[nextIdx].trim()
-                    if (isRomanization(nextLine)) continue // "Daesong 4-gil" 건너뜀
-                    if (nextLine.length < 15 && numberPattern.matches(nextLine)) {
-                        val onlyNumberMatch = Regex("\\d{1,4}(-\\d{1,4})?").find(nextLine)
-                        if (onlyNumberMatch != null) {
-                            return "$line ${onlyNumberMatch.value}" // "대송4길 80"
-                        }
-                    }
-                    break // 번지수도 로마자도 아니면 중단
                 }
 
                 return line
@@ -173,6 +200,14 @@ class AddressExtractor {
         }
 
         return ""
+    }
+
+    /** 금액/가격 줄 여부 (번지수 탐색 시 건너뜀) */
+    private fun isCurrencyOrPriceLine(line: String): Boolean {
+        val lower = line.lowercase().trim()
+        return lower.contains("krw") || lower.contains("원") ||
+                lower.contains("usd") || lower.contains("₩") ||
+                Regex("\\d{1,3}(,\\d{3})+").containsMatchIn(line)
     }
 
     /** 영문 로마자 병기 줄 여부 (주소 탐색 시 건너뜀) */
