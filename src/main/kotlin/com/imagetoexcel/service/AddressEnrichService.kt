@@ -147,8 +147,21 @@ class AddressEnrichService(
     private fun extractRoadNameQuery(address: String): String? {
         val roadNameWithNumber = Regex("([가-힣]+\\d*[로길])\\s*(\\d{1,4}(?:-\\d{1,4})?)")
         val match = roadNameWithNumber.find(address) ?: return null
-        val road = match.groupValues[1]
+        var road = match.groupValues[1]
         val number = match.groupValues[2]
+
+        // 행정구역 접미사(시/군/구/면/읍) 뒤의 실제 도로명만 추출
+        // "장난강진궁신전면신전로" → "면" 뒤 → "신전로"
+        // "평택시지제동삭2로" → "시" 뒤 → "지제동삭2로"
+        // ※ "동/리"는 도로명에 포함되는 경우가 많아 제외 (예: 지제동삭2로)
+        val adminSplit = Regex(".*[시군구면읍]").find(road)
+        if (adminSplit != null && adminSplit.range.last + 1 < road.length) {
+            val afterAdmin = road.substring(adminSplit.range.last + 1)
+            if (afterAdmin.length >= 2) {
+                road = afterAdmin
+            }
+        }
+
         return "$road $number"
     }
 
