@@ -683,6 +683,15 @@
 
         fileInput.addEventListener('change', function () {
             if (isSorting) return;
+            // 사용자가 취소(아무것도 선택 안함)한 경우
+            if (this.files.length === 0 && accumulatedFiles.files.length === 0) {
+                submitBtn.disabled = true;
+                dropzoneText.innerHTML =
+                    '<p>클릭하거나 이미지를 드래그하세요 (여러 장 선택 가능)</p>' +
+                    '<p style="color: #999; font-size: 0.9rem; margin-top: 0.5rem;">지원 형식: PNG, JPG, JPEG</p>';
+                return;
+            }
+
             if (this.files.length > 0) {
                 try {
                     isSorting = true;
@@ -708,9 +717,11 @@
                 } finally {
                     isSorting = false;
                 }
+            }
 
-                const count = this.files.length;
-                const names = Array.from(this.files).map(f => f.name).join(', ');
+            if (accumulatedFiles.files.length > 0) {
+                const count = accumulatedFiles.files.length;
+                const names = Array.from(accumulatedFiles.files).map(f => f.name).join(', ');
                 dropzoneText.innerHTML =
                     '<p style="color: #28a745;">' + count + '개 파일 선택됨</p>' +
                     '<p style="color: #666; font-size: 0.85rem; margin-top: 0.25rem;">' + names + '</p>';
