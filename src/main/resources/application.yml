@@ -24,6 +24,7 @@ juso:
 naver:
   client-id: ${NAVER_CLIENT_ID:}
   client-secret: ${NAVER_CLIENT_SECRET:}
+  geocode-url: ${NAVER_GEOCODE_URL:https://maps.apigw.ntruss.com/map-geocode/v2/geocode}
 
 # 주문 기본값 설정
 order:

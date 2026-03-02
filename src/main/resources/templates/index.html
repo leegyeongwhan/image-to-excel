@@ -426,7 +426,7 @@
         .naver-fallback {
             padding: 1rem;
             text-align: center;
-            border-top: 1px solid #e9ecef;
+            border-top: 2px solid #e9ecef;
             margin-top: 0.5rem;
         }
 
@@ -653,9 +653,9 @@
     <!-- 주소 검색 모달 -->
     <div class="modal-overlay" id="addressModal">
         <div class="modal">
-            <h3>도로명주소 검색</h3>
+            <h3>주소 검색</h3>
             <div class="search-input-group">
-                <input type="text" id="addressSearchInput" placeholder="도로명을 입력하세요 (예: 흑석로)"
+                <input type="text" id="addressSearchInput" placeholder="주소를 입력하세요 (예: 흑석로, 대대리 737-2)"
                     onkeydown="if(event.key==='Enter') searchAddress()">
                 <button type="button" class="btn-modal-search" onclick="searchAddress()">검색</button>
             </div>
@@ -801,54 +801,85 @@
             resultsDiv.innerHTML = '<div class="search-status">검색 중...</div>';
             document.getElementById('searchPagination').style.display = 'none';
 
-            fetch('/api/address/search?keyword=' + encodeURIComponent(keyword) + '&page=' + currentPage)
-                .then(res => res.json())
-                .then(data => {
-                    currentTotalCount = data.totalCount;
-                    renderSearchResults(data);
-                })
-                .catch(() => {
-                    resultsDiv.innerHTML = '<div class="search-status">검색 중 오류가 발생했습니다.</div>';
-                });
+            // 도로명 + 네이버 동시 호출
+            const jusoPromise = fetch('/api/address/search?keyword=' + encodeURIComponent(keyword) + '&page=' + currentPage)
+                .then(res => res.json()).catch(() => ({totalCount: 0, addresses: []}));
+            const naverPromise = fetch('/api/address/naver-search?keyword=' + encodeURIComponent(keyword))
+                .then(res => res.json()).catch(() => ({totalCount: 0, addresses: []}));
+
+            Promise.all([jusoPromise, naverPromise]).then(([jusoData, naverData]) => {
+                currentTotalCount = jusoData.totalCount;
+                renderCombinedResults(jusoData, naverData);
+            });
         }
 
-        function renderSearchResults(data) {
+        function renderCombinedResults(jusoData, naverData) {
             const resultsDiv = document.getElementById('searchResults');
             const keyword = currentKeyword;
+            const hasJuso = jusoData.addresses && jusoData.addresses.length > 0;
+            const hasNaver = naverData.addresses && naverData.addresses.length > 0;
 
-            if (!data.addresses || data.addresses.length === 0) {
+            if (!hasJuso && !hasNaver) {
                 const naverUrl = 'https://map.naver.com/p/search/' + encodeURIComponent(keyword);
                 resultsDiv.innerHTML =
-                    '<div class="search-status">도로명주소 검색 결과가 없습니다.</div>' +
-                    '<div class="naver-fallback">' +
-                    '<p>시골 지역이나 상세 주소는 네이버지도에서 검색해보세요.</p>' +
-                    '<a class="btn-naver" href="' + naverUrl + '" target="_blank" rel="noopener">' +
-                    '네이버지도에서 검색' +
-                    '</a>' +
-                    '<div class="manual-input-group">' +
-                    '<input type="text" id="manualAddressInput" ' +
-                    'placeholder="네이버지도에서 찾은 주소를 입력하세요"' +
-                    ' onkeydown="if(event.key===\'Enter\') applyManualAddress()">' +
-                    '<button type="button" class="btn-manual-apply" onclick="applyManualAddress()">적용</button>' +
-                    '</div>' +
-                    '</div>';
+                    '<div class="search-status">검색 결과가 없습니다.</div>' +
+                    buildFallbackHtml(naverUrl);
                 document.getElementById('searchPagination').style.display = 'none';
                 return;
             }
 
+            // 도로명 + 네이버 결과를 하나의 리스트로 합침 (중복 제거)
+            const seen = new Set();
+            const allResults = [];
+
+            if (hasJuso) {
+                jusoData.addresses.forEach(addr => {
+                    seen.add(addr.roadAddr);
+                    allResults.push({roadAddr: addr.roadAddr, jibunAddr: addr.jibunAddr, zipNo: addr.zipNo, source: 'juso'});
+                });
+            }
+            if (hasNaver) {
+                naverData.addresses.forEach(addr => {
+                    if (!seen.has(addr.roadAddr)) {
+                        allResults.push({roadAddr: addr.roadAddr, jibunAddr: addr.jibunAddr, zipNo: '', source: 'naver'});
+                    }
+                });
+            }
+
             let html = '';
-            data.addresses.forEach(addr => {
+            allResults.forEach(addr => {
+                const badge = addr.source === 'naver'
+                    ? '<span style="font-size:0.7rem;color:#03c75a;font-weight:bold;margin-left:0.4rem;">네이버</span>'
+                    : '<span style="font-size:0.7rem;color:#0066cc;font-weight:bold;margin-left:0.4rem;">도로명</span>';
                 html += '<div class="search-result-item" onclick="selectAddress(this)" ' +
                     'data-road="' + escapeHtml(addr.roadAddr) + '">' +
-                    '<div class="search-result-road">' + escapeHtml(addr.roadAddr) + '</div>' +
-                    '<div class="search-result-jibun">[지번] ' + escapeHtml(addr.jibunAddr) + '</div>' +
-                    '<div class="search-result-zip">[우편번호] ' + escapeHtml(addr.zipNo) + '</div>' +
+                    '<div class="search-result-road">' + escapeHtml(addr.roadAddr) + badge + '</div>' +
+                    (addr.jibunAddr ? '<div class="search-result-jibun">[지번] ' + escapeHtml(addr.jibunAddr) + '</div>' : '') +
+                    (addr.zipNo ? '<div class="search-result-zip">[우편번호] ' + escapeHtml(addr.zipNo) + '</div>' : '') +
                     '</div>';
             });
 
-            // 검색 결과가 있어도 네이버지도 링크 제공
+            // 하단 네이버지도 수동 검색
             const naverUrl = 'https://map.naver.com/p/search/' + encodeURIComponent(keyword);
-            html += '<div class="naver-fallback">' +
+            html += buildFallbackHtml(naverUrl);
+
+            resultsDiv.innerHTML = html;
+
+            // 페이지네이션 (도로명 결과 기준)
+            const totalPages = Math.ceil(currentTotalCount / PAGE_SIZE);
+            if (totalPages > 1) {
+                document.getElementById('searchPagination').style.display = 'flex';
+                document.getElementById('pageInfo').textContent =
+                    currentPage + ' / ' + totalPages + ' (총 ' + currentTotalCount + '건)';
+                document.getElementById('btnPrevPage').disabled = (currentPage <= 1);
+                document.getElementById('btnNextPage').disabled = (currentPage >= totalPages);
+            } else {
+                document.getElementById('searchPagination').style.display = 'none';
+            }
+        }
+
+        function buildFallbackHtml(naverUrl) {
+            return '<div class="naver-fallback">' +
                 '<p>원하는 주소가 없나요?</p>' +
                 '<a class="btn-naver" href="' + naverUrl + '" target="_blank" rel="noopener">' +
                 '네이버지도에서 검색' +
@@ -860,20 +891,6 @@
                 '<button type="button" class="btn-manual-apply" onclick="applyManualAddress()">적용</button>' +
                 '</div>' +
                 '</div>';
-
-            resultsDiv.innerHTML = html;
-
-            // 페이지네이션
-            const totalPages = Math.ceil(currentTotalCount / PAGE_SIZE);
-            if (totalPages > 1) {
-                document.getElementById('searchPagination').style.display = 'flex';
-                document.getElementById('pageInfo').textContent =
-                    currentPage + ' / ' + totalPages + ' (총 ' + currentTotalCount + '건)';
-                document.getElementById('btnPrevPage').disabled = (currentPage <= 1);
-                document.getElementById('btnNextPage').disabled = (currentPage >= totalPages);
-            } else {
-                document.getElementById('searchPagination').style.display = 'none';
-            }
         }
 
         function changePage(delta) {

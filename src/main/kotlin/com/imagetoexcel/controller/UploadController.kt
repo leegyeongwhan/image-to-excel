@@ -2,7 +2,9 @@ package com.imagetoexcel.controller
 
 import com.imagetoexcel.component.ApiUsageTracker
 import com.imagetoexcel.infrastructure.JusoApiClient
+import com.imagetoexcel.infrastructure.JusoAddress
 import com.imagetoexcel.infrastructure.JusoSearchResult
+import com.imagetoexcel.infrastructure.NaverGeocodingClient
 import com.imagetoexcel.service.UploadService
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -19,7 +21,8 @@ import org.springframework.web.multipart.MultipartFile
 class UploadController(
     private val uploadService: UploadService,
     private val apiUsageTracker: ApiUsageTracker,
-    private val jusoApiClient: JusoApiClient
+    private val jusoApiClient: JusoApiClient,
+    private val naverGeocodingClient: NaverGeocodingClient
 ) {
 
     @GetMapping("/")
@@ -70,6 +73,19 @@ class UploadController(
         @RequestParam("page", defaultValue = "1") page: Int
     ): JusoSearchResult {
         return jusoApiClient.search(keyword, page)
+    }
+
+    @GetMapping("/api/address/naver-search")
+    @ResponseBody
+    fun naverSearchAddress(@RequestParam("keyword") keyword: String): JusoSearchResult {
+        val result = naverGeocodingClient.geocodeDetailed(keyword)
+            ?: return JusoSearchResult(totalCount = 0, addresses = emptyList())
+        val address = JusoAddress(
+            roadAddr = result.roadAddress.ifBlank { result.jibunAddress },
+            jibunAddr = result.jibunAddress,
+            zipNo = ""
+        )
+        return JusoSearchResult(totalCount = 1, addresses = listOf(address))
     }
 
     @PostMapping("/download")

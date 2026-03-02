@@ -35,14 +35,19 @@ class AddressEnrichService(
 
         // Juso API 검색을 위한 주소 정규화 및 변환 (행정구역명 약칭 복원, 도로명 추출 등)
         val normalizedAddress = normalizeRegionName(address)
+        val cleanedAddress = cleanAddressForSearch(normalizedAddress)
         val (strippedAddress, suffix) = extractSuffix(normalizedAddress)
         val roadOnly = extractRoadNameQuery(normalizedAddress)
+        val cleanedRoadOnly = extractRoadNameQuery(cleanedAddress)
         val noTrailingNum = normalizedAddress.replace(Regex("\\s+\\d+(-\\d+)?\\s*$"), "").trim()
 
-        // 3. Juso API 검색 전략 (순차적 폴백: 전체 -> 뒷번호제거 -> 상호명제거 -> 도로명만)
+        // 3. Juso API 검색 전략 (순차적 폴백: 전체 -> 노이즈제거 -> 뒷번호제거 -> 상호명제거 -> 도로명만)
         val jusoStrategies =
                 sequenceOf(
                         normalizedAddress to "",
+                        (if (cleanedAddress != normalizedAddress && cleanedAddress.isNotBlank())
+                                cleanedAddress
+                        else null) to "",
                         (if (noTrailingNum != normalizedAddress && noTrailingNum.isNotBlank())
                                 noTrailingNum
                         else null) to "",
@@ -50,6 +55,8 @@ class AddressEnrichService(
                                 strippedAddress
                         else null) to suffix,
                         (if (roadOnly != null && roadOnly != normalizedAddress) roadOnly
+                        else null) to "",
+                        (if (cleanedRoadOnly != null && cleanedRoadOnly != roadOnly) cleanedRoadOnly
                         else null) to ""
                 )
 
@@ -69,6 +76,7 @@ class AddressEnrichService(
         val naverStrategies =
                 sequenceOf(
                         normalizedAddress,
+                        if (cleanedAddress != normalizedAddress) cleanedAddress else null,
                         roadOnly ?: normalizedAddress,
                         if (strippedAddress != normalizedAddress) strippedAddress else null
                 )
@@ -139,6 +147,19 @@ class AddressEnrichService(
         }
 
         return "$road $number"
+    }
+
+    /** 검색용으로 주소에서 노이즈를 제거합니다. (괄호 내용, 층수, 번지 등) */
+    private fun cleanAddressForSearch(address: String): String {
+        return address
+                .replace(Regex("\\([^)]*\\)"), "")              // 괄호 내용 제거
+                .replace(Regex("\\s+\\d+[Ff]\\b"), "")          // 층수 (3F 등)
+                .replace(Regex("\\s+[Bb]\\d+\\b"), "")          // 지하층 (B1 등)
+                .replace(Regex("\\d+층"), "")                    // N층
+                .replace("번지", "")                              // 번지 제거
+                .replace(Regex("([동리])([0-9])"), "$1 $2")      // 사창동492 → 사창동 492
+                .replace(Regex("\\s+"), " ")                     // 중복 공백 제거
+                .trim()
     }
 
     /** OCR이 자주 틀리는 행정구역 약칭을 정식 명칭으로 변환합니다. (예: "전북도" → "전북특별자치도") */

@@ -9,6 +9,11 @@ import org.springframework.stereotype.Component
 import org.springframework.web.client.RestTemplate
 import org.springframework.web.util.UriComponentsBuilder
 
+data class NaverGeocodeResult(
+    val roadAddress: String,
+    val jibunAddress: String
+)
+
 private val logger = KotlinLogging.logger {}
 
 @Component
@@ -17,17 +22,13 @@ class NaverGeocodingClient(
     private val restTemplate: RestTemplate
 ) {
 
-    companion object {
-        private const val GEOCODE_URL = "https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode"
-    }
-
     fun isConfigured(): Boolean =
         naverProperties.clientId.isNotBlank() && naverProperties.clientSecret.isNotBlank()
 
     fun geocode(query: String): String? {
         if (!isConfigured()) return null
 
-        val uri = UriComponentsBuilder.fromUriString(GEOCODE_URL)
+        val uri = UriComponentsBuilder.fromUriString(naverProperties.geocodeUrl)
             .queryParam("query", query)
             .build()
             .toUriString()
@@ -44,7 +45,34 @@ class NaverGeocodingClient(
                 HttpEntity<Void>(headers),
                 Map::class.java
             )
-            parseRoadAddress(response.body)
+            parseAddress(response.body)
+        } catch (e: Exception) {
+            logger.error(e) { "Naver Geocoding API 호출 실패: query=$query" }
+            null
+        }
+    }
+
+    fun geocodeDetailed(query: String): NaverGeocodeResult? {
+        if (!isConfigured()) return null
+
+        val uri = UriComponentsBuilder.fromUriString(naverProperties.geocodeUrl)
+            .queryParam("query", query)
+            .build()
+            .toUriString()
+
+        val headers = HttpHeaders().apply {
+            set("X-NCP-APIGW-API-KEY-ID", naverProperties.clientId)
+            set("X-NCP-APIGW-API-KEY", naverProperties.clientSecret)
+        }
+
+        return try {
+            val response = restTemplate.exchange(
+                uri,
+                HttpMethod.GET,
+                HttpEntity<Void>(headers),
+                Map::class.java
+            )
+            parseDetailedAddress(response.body)
         } catch (e: Exception) {
             logger.error(e) { "Naver Geocoding API 호출 실패: query=$query" }
             null
@@ -52,10 +80,19 @@ class NaverGeocodingClient(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun parseRoadAddress(body: Map<*, *>?): String? {
+    private fun parseAddress(body: Map<*, *>?): String? {
+        val result = parseDetailedAddress(body) ?: return null
+        return result.roadAddress.ifBlank { result.jibunAddress }.ifBlank { null }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun parseDetailedAddress(body: Map<*, *>?): NaverGeocodeResult? {
         val addresses = body?.get("addresses") as? List<Map<String, Any>>
         if (addresses.isNullOrEmpty()) return null
-        val roadAddress = addresses[0]["roadAddress"]?.toString()
-        return if (roadAddress.isNullOrBlank()) null else roadAddress
+        val addr = addresses[0]
+        val road = addr["roadAddress"]?.toString() ?: ""
+        val jibun = addr["jibunAddress"]?.toString() ?: ""
+        if (road.isBlank() && jibun.isBlank()) return null
+        return NaverGeocodeResult(roadAddress = road, jibunAddress = jibun)
     }
 }
