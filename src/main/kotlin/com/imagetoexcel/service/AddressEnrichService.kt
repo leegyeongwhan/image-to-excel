@@ -1,6 +1,5 @@
 package com.imagetoexcel.service
 
-import com.imagetoexcel.domain.enum.KoreanRegion
 import com.imagetoexcel.infrastructure.JusoApiClient
 import com.imagetoexcel.infrastructure.NaverGeocodingClient
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -8,81 +7,64 @@ import org.springframework.stereotype.Service
 
 private val logger = KotlinLogging.logger {}
 
+/**
+ * 검색 전략 하나를 나타냅니다.
+ * @param query   Juso/Naver API에 보낼 검색어
+ * @param suffix  검색 성공 시 결과 뒤에 붙일 텍스트 (상호명 등). 없으면 빈 문자열.
+ */
+private data class SearchStrategy(val query: String, val suffix: String = "")
+
+/**
+ * 주소 보정 서비스.
+ * AddressParser로 주소를 변환하고, Juso/Naver API로 검증합니다.
+ */
 @Service
 class AddressEnrichService(
         private val jusoApiClient: JusoApiClient,
-        private val naverGeocodingClient: NaverGeocodingClient
+        private val naverGeocodingClient: NaverGeocodingClient,
+        private val parser: AddressParser
 ) {
 
-    private val detailUnitPattern = Regex("\\d+호|\\d+동\\s*\\d|\\d+층")
-
     /**
-     * 주소 정보를 받아 정규화 및 API(Juso, Naver) 검색을 통해 보정된 주소와 유효성 여부를 반환합니다.
-     * @param address 원본 주소 문자열
+     * 주소 정보를 받아 API 검색을 통해 보정된 주소와 유효성 여부를 반환합니다.
      * @return Pair<보정된 주소, 유효성 성공 여부>
      */
     fun enrich(address: String): Pair<String, Boolean> {
-        // 1. 스킵 조건: 빈 문자열, "외국인", 인식 실패 메시지
+        // 1. 스킵 조건
         if (address.isBlank() || address == "외국인" || address.startsWith("[인식 실패]")) {
             return Pair(address, false)
         }
 
-        // 2. 상세 주소(건물명 + 동/호수)가 포함된 경우 우선 처리
-        // 기본 주소와 상세 주소를 분리하여 기본 주소만 검색 후 상세 결과를 결합합니다.
-        if (isDetailedAddress(address)) {
+        // 2. 상세 주소(건물명 + 동/호수)가 포함된 경우 별도 처리
+        if (parser.isDetailedAddress(address)) {
             return enrichDetailedAddress(address)
         }
 
-        // Juso API 검색을 위한 주소 정규화 및 변환 (행정구역명 약칭 복원, 도로명 추출 등)
-        val normalizedAddress = normalizeRegionName(address)
-        val cleanedAddress = cleanAddressForSearch(normalizedAddress)
-        val (strippedAddress, suffix) = extractSuffix(normalizedAddress)
-        val roadOnly = extractRoadNameQuery(normalizedAddress)
-        val cleanedRoadOnly = extractRoadNameQuery(cleanedAddress)
-        val noTrailingNum = normalizedAddress.replace(Regex("\\s+\\d+(-\\d+)?\\s*$"), "").trim()
+        // 3. 주소 정규화
+        val normalized = parser.normalizeRegionName(address)
+        val cleaned = parser.cleanForSearch(normalized)
+        val (stripped, suffix) = parser.extractSuffix(normalized)
+        val roadOnly = parser.extractRoadNameQuery(normalized)
+        val cleanedRoadOnly = parser.extractRoadNameQuery(cleaned)
+        val noTrailingNum = parser.removeTrailingNumber(normalized)
 
-        // 3. Juso API 검색 전략 (순차적 폴백: 전체 -> 노이즈제거 -> 뒷번호제거 -> 상호명제거 -> 도로명만)
-        val jusoStrategies =
-                sequenceOf(
-                        normalizedAddress to "",
-                        (if (cleanedAddress != normalizedAddress && cleanedAddress.isNotBlank())
-                                cleanedAddress
-                        else null) to "",
-                        (if (noTrailingNum != normalizedAddress && noTrailingNum.isNotBlank())
-                                noTrailingNum
-                        else null) to "",
-                        (if (strippedAddress != normalizedAddress && strippedAddress.isNotBlank())
-                                strippedAddress
-                        else null) to suffix,
-                        (if (roadOnly != null && roadOnly != normalizedAddress) roadOnly
-                        else null) to "",
-                        (if (cleanedRoadOnly != null && cleanedRoadOnly != roadOnly) cleanedRoadOnly
-                        else null) to ""
-                )
-
-        for ((query, currentSuffix) in jusoStrategies) {
-            if (query == null) continue
-            val result = jusoApiClient.search(query, page = 1, countPerPage = 1)
+        // 4. Juso API 순차 검색
+        val jusoStrategies = buildJusoStrategies(
+                normalized, cleaned, noTrailingNum, stripped, suffix, roadOnly, cleanedRoadOnly
+        )
+        for (strategy in jusoStrategies) {
+            val result = jusoApiClient.search(strategy.query, page = 1, countPerPage = 1)
             if (result.totalCount > 0 && result.addresses.isNotEmpty()) {
                 val roadAddr = result.addresses.first().roadAddr
-                val enriched =
-                        if (currentSuffix.isNotBlank()) "$roadAddr $currentSuffix" else roadAddr
+                val enriched = if (strategy.suffix.isNotBlank()) "$roadAddr ${strategy.suffix}" else roadAddr
                 logger.info { "주소 자동 보정 (Juso): \"$address\" → \"$enriched\"" }
                 return Pair(enriched, true)
             }
         }
 
-        // 4. Naver Geocoding API 검색 전략 (최종 폴백)
-        val naverStrategies =
-                sequenceOf(
-                        normalizedAddress,
-                        if (cleanedAddress != normalizedAddress) cleanedAddress else null,
-                        roadOnly ?: normalizedAddress,
-                        if (strippedAddress != normalizedAddress) strippedAddress else null
-                )
-
-        for (query in naverStrategies) {
-            if (query == null) continue
+        // 5. Naver API 순차 검색 (Juso 전체 실패 시)
+        val naverQueries = buildNaverQueries(normalized, cleaned, roadOnly, stripped)
+        for (query in naverQueries) {
             val naverResult = naverGeocodingClient.geocode(query)
             if (naverResult != null) {
                 val enriched = if (suffix.isNotBlank()) "$naverResult $suffix" else naverResult
@@ -95,150 +77,97 @@ class AddressEnrichService(
         return Pair(address, false)
     }
 
-    private fun enrichDetailedAddress(address: String): Pair<String, Boolean> {
-        val (base, detail) = splitBuildingDetail(address)
-        if (base.isNotBlank() && detail.isNotBlank()) {
-            val normalizedBase = normalizeRoadSpacing(normalizeRegionName(base))
+    // ========================
+    // 검색 전략 목록 생성
+    // ========================
 
-            val jusoResult = jusoApiClient.search(normalizedBase, page = 1, countPerPage = 1)
-            if (jusoResult.totalCount > 0 && jusoResult.addresses.isNotEmpty()) {
-                val enriched = combineWithDetail(jusoResult.addresses.first().roadAddr, detail)
-                logger.info { "주소 자동 보정 (Juso 상세분리): \"$address\" → \"$enriched\"" }
+    private fun buildJusoStrategies(
+            normalized: String,
+            cleaned: String,
+            noTrailingNum: String,
+            stripped: String,
+            suffix: String,
+            roadOnly: String?,
+            cleanedRoadOnly: String?
+    ): List<SearchStrategy> = buildList {
+        // 1) 전체 주소 그대로
+        add(SearchStrategy(normalized))
+
+        // 2) 노이즈(괄호, 층수, 번지) 제거
+        if (cleaned != normalized && cleaned.isNotBlank()) {
+            add(SearchStrategy(cleaned))
+        }
+
+        // 3) 뒤 번호 제거 (예: "대청로 59번길 15-1" → "대청로 59번길")
+        if (noTrailingNum != normalized && noTrailingNum.isNotBlank()) {
+            add(SearchStrategy(noTrailingNum))
+        }
+
+        // 4) 쉼표 기준 상호명 분리 (예: "창서길 52-200, 다온농장" → 검색: "창서길 52-200", 붙임: "다온농장")
+        if (stripped != normalized && stripped.isNotBlank()) {
+            add(SearchStrategy(stripped, suffix))
+        }
+
+        // 5) 하위 행정구역 조합 (예: "함평군 창서길 52-200")
+        parser.extractSubAdminQueries(normalized).forEach { add(SearchStrategy(it)) }
+
+        // 6) 도로명 + 건물번호만 (예: "창서길 52-200")
+        if (roadOnly != null && roadOnly != normalized) {
+            add(SearchStrategy(roadOnly))
+        }
+
+        // 7) 정리된 도로명
+        if (cleanedRoadOnly != null && cleanedRoadOnly != roadOnly) {
+            add(SearchStrategy(cleanedRoadOnly))
+        }
+    }
+
+    private fun buildNaverQueries(
+            normalized: String,
+            cleaned: String,
+            roadOnly: String?,
+            stripped: String
+    ): List<String> = buildList {
+        add(normalized)
+        if (cleaned != normalized) add(cleaned)
+        addAll(parser.extractSubAdminQueries(normalized))
+        add(roadOnly ?: normalized)
+        if (stripped != normalized) add(stripped)
+    }
+
+    // ========================
+    // 상세 주소 처리
+    // ========================
+
+    private fun enrichDetailedAddress(address: String): Pair<String, Boolean> {
+        val (base, detail) = parser.splitBuildingDetail(address)
+        if (base.isBlank() || detail.isBlank()) {
+            logger.info { "상세 주소 감지, 보정 생략: \"$address\"" }
+            return Pair(address, false)
+        }
+
+        val normalizedBase = parser.normalizeRoadSpacing(parser.normalizeRegionName(base))
+
+        // 기본 주소로 검색
+        val jusoResult = jusoApiClient.search(normalizedBase, page = 1, countPerPage = 1)
+        if (jusoResult.totalCount > 0 && jusoResult.addresses.isNotEmpty()) {
+            val enriched = parser.combineWithDetail(jusoResult.addresses.first().roadAddr, detail)
+            logger.info { "주소 자동 보정 (Juso 상세분리): \"$address\" → \"$enriched\"" }
+            return Pair(enriched, true)
+        }
+
+        // 도로명만으로 재시도
+        val roadOnly = parser.extractRoadNameQuery(normalizedBase)
+        if (roadOnly != null && roadOnly != normalizedBase) {
+            val roadFallback = jusoApiClient.search(roadOnly, page = 1, countPerPage = 1)
+            if (roadFallback.totalCount > 0 && roadFallback.addresses.isNotEmpty()) {
+                val enriched = parser.combineWithDetail(roadFallback.addresses.first().roadAddr, detail)
+                logger.info { "주소 자동 보정 (Juso 상세분리 도로명): \"$address\" → \"$enriched\"" }
                 return Pair(enriched, true)
             }
-
-            val roadOnly = extractRoadNameQuery(normalizedBase)
-            if (roadOnly != null && roadOnly != normalizedBase) {
-                val roadFallback = jusoApiClient.search(roadOnly, page = 1, countPerPage = 1)
-                if (roadFallback.totalCount > 0 && roadFallback.addresses.isNotEmpty()) {
-                    val enriched =
-                            combineWithDetail(roadFallback.addresses.first().roadAddr, detail)
-                    logger.info { "주소 자동 보정 (Juso 상세분리 도로명): \"$address\" → \"$enriched\"" }
-                    return Pair(enriched, true)
-                }
-            }
         }
+
         logger.info { "상세 주소 감지, 보정 생략: \"$address\"" }
         return Pair(address, false)
-    }
-
-    /** 상세주소(건물명 + 동/호수)가 포함되어 있는지 확인합니다. */
-    private fun isDetailedAddress(address: String): Boolean {
-        return KoreanRegion.containsAny(address) && detailUnitPattern.containsMatchIn(address)
-    }
-
-    /** 도로명과 건물번호 사이 띄어쓰기를 정규화합니다. OCR이 공백 없이 뭉쳐낸 경우를 대비합니다. 예: "평택시지제동삭2로177" → "평택시지제동삭2로 177" */
-    private fun normalizeRoadSpacing(address: String): String {
-        return address.replace(Regex("([가-힣](?:로|길))(\\d)"), "$1 $2")
-    }
-
-    /** 주소에서 도로명 + 건물번호만 추출하여 Juso 검색용 쿼리를 생성합니다. 도로명 앞의 노이즈가 있는 경우 활용됩니다. */
-    private fun extractRoadNameQuery(address: String): String? {
-        val roadNameWithNumber = Regex("([가-힣]+\\d*[로길])\\s*(\\d{1,4}(?:-\\d{1,4})?)")
-        val match = roadNameWithNumber.find(address) ?: return null
-        var road = match.groupValues[1]
-        val number = match.groupValues[2]
-
-        // 행정구역 접미사(시/군/구/면/읍) 뒤의 실제 도로명만 추출
-        val adminSplit = Regex(".*[시군구면읍]").find(road)
-        if (adminSplit != null && adminSplit.range.last + 1 < road.length) {
-            val afterAdmin = road.substring(adminSplit.range.last + 1)
-            if (afterAdmin.length >= 2) road = afterAdmin
-        }
-
-        return "$road $number"
-    }
-
-    /** 검색용으로 주소에서 노이즈를 제거합니다. (괄호 내용, 층수, 번지 등) */
-    private fun cleanAddressForSearch(address: String): String {
-        return address
-                .replace(Regex("\\([^)]*\\)"), "")              // 괄호 내용 제거
-                .replace(Regex("\\s+\\d+[Ff]\\b"), "")          // 층수 (3F 등)
-                .replace(Regex("\\s+[Bb]\\d+\\b"), "")          // 지하층 (B1 등)
-                .replace(Regex("\\d+층"), "")                    // N층
-                .replace("번지", "")                              // 번지 제거
-                .replace(Regex("([동리])([0-9])"), "$1 $2")      // 사창동492 → 사창동 492
-                .replace(Regex("\\s+"), " ")                     // 중복 공백 제거
-                .trim()
-    }
-
-    /** OCR이 자주 틀리는 행정구역 약칭을 정식 명칭으로 변환합니다. (예: "전북도" → "전북특별자치도") */
-    private fun normalizeRegionName(address: String): String {
-        return address.replace(Regex("전북도(?!특별)"), "전북특별자치도 ")
-                .replace("전라북도 ", "전북특별자치도 ")
-                .replace(Regex("전남도(?!라)"), "전라남도 ")
-                .replace(Regex("경남도(?!상)"), "경상남도 ")
-                .replace(Regex("경북도(?!상)"), "경상북도 ")
-                .replace(Regex("충북도(?!청)"), "충청북도 ")
-                .replace(Regex("충남도(?!청)"), "충청남도 ")
-                .replace("강원도 ", "강원특별자치도 ")
-                .trim()
-    }
-
-    /** 주소에서 검색용 핵심 주소와 최종적으로 붙여야 할 접미(상호명/동호수)를 분리합니다. */
-    private fun extractSuffix(address: String): Pair<String, String> {
-        if (address.contains(",")) {
-            val beforeComma = address.substringBefore(",").trim()
-            val afterComma = address.substringAfter(",").trim()
-            val numberMatch = Regex("^(\\d+(?:-\\d+)?)\\s*(.*)$").find(afterComma)
-            if (numberMatch != null) {
-                val number = numberMatch.groupValues[1]
-                val suffix = numberMatch.groupValues[2].trim()
-                val core = if (number.isNotBlank()) "$beforeComma $number" else beforeComma
-                return Pair(core, suffix)
-            }
-            return Pair(beforeComma, afterComma)
-        }
-        return Pair(address, "")
-    }
-
-    private fun splitBuildingDetail(address: String): Pair<String, String> {
-        val buildingStart = Regex("[가-힣A-Za-z0-9]+(?:아파트|빌라|오피스텔|맨션|타운|파크|하우스|APT|apt)")
-        buildingStart.find(address)?.let {
-            val base = address.substring(0, it.range.first).trim()
-            val detail = address.substring(it.range.first).trim()
-            if (base.isNotBlank()) return Pair(base, detail)
-        }
-
-        val roadWithNumber = Regex("([가-힣]+\\d*[로길])\\s*(\\d{1,4}(?:-\\d{1,4})?)")
-        roadWithNumber.find(address)?.let {
-            val afterRoadNumber = it.range.last + 1
-            if (afterRoadNumber < address.length) {
-                val remaining = address.substring(afterRoadNumber).trim()
-                if (remaining.isNotBlank() && detailUnitPattern.containsMatchIn(remaining)) {
-                    val base = address.substring(0, afterRoadNumber).trim()
-                    return Pair(base, remaining)
-                }
-            }
-        }
-
-        val unitStart = Regex("\\s+\\d+동\\s+\\d+호|\\s+\\d+호\\s*$")
-        unitStart.find(address)?.let {
-            val base = address.substring(0, it.range.first).trim()
-            val detail = address.substring(it.range.first).trim()
-            if (base.isNotBlank()) return Pair(base, detail)
-        }
-
-        return Pair(address, "")
-    }
-
-    private fun combineWithDetail(roadAddr: String, detail: String): String {
-        if (detail.isBlank()) return roadAddr
-
-        val unitInfo =
-                detail.replace(
-                                Regex("^[가-힣A-Za-z0-9]+(?:아파트|빌라|오피스텔|맨션|타운|파크|하우스|APT|apt)\\s*"),
-                                ""
-                        )
-                        .trim()
-        val parenMatch = Regex("\\(([^)]+)\\)\\s*$").find(roadAddr)
-
-        if (parenMatch != null && unitInfo.isNotBlank()) {
-            val basePart = roadAddr.substring(0, parenMatch.range.first)
-            val buildingName = parenMatch.groupValues[1]
-            return "$basePart($buildingName $unitInfo)"
-        }
-
-        return if (unitInfo.isNotBlank()) "$roadAddr ($detail)" else "$roadAddr ($detail)"
     }
 }

@@ -20,7 +20,7 @@
         }
 
         .container {
-            max-width: 900px;
+            max-width: 1100px;
             margin: 0 auto;
         }
 
@@ -488,6 +488,28 @@
             background: #e8590c;
         }
 
+        /* 한글 입력 안내 토스트 */
+        .korean-toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #dc3545;
+            color: #fff;
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            z-index: 10000;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        .korean-toast.show {
+            opacity: 1;
+        }
+
         /* 편집 및 드래그 앤 드롭 스타일 */
         .edit-input {
             width: 100%;
@@ -540,6 +562,22 @@
 
         .drag-handle:active {
             cursor: grabbing;
+        }
+
+        /* 체크박스(책갈피) 스타일 */
+        .row-checkbox {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #28a745;
+        }
+
+        .result-table tbody tr.row-checked {
+            background-color: #f0faf0;
+        }
+
+        .result-table tbody tr.row-checked .edit-input {
+            color: #999;
         }
     </style>
 </head>
@@ -600,9 +638,13 @@
                     <tr>
                         <th style="width: 40px; text-align: center;">순서</th>
                         <th style="width: 50px;">No.</th>
-                        <th style="width: 15%;">이름</th>
-                        <th style="width: 50%;">주소</th>
-                        <th style="width: 15%;">전화번호</th>
+                        <th style="width: 30px; text-align: center;">
+                            <input type="checkbox" class="row-checkbox" id="checkAll"
+                                onclick="toggleAllCheckboxes(this)" title="전체 선택/해제">
+                        </th>
+                        <th style="width: 12%;">이름</th>
+                        <th style="width: 55%;">주소</th>
+                        <th style="width: 12%;">전화번호</th>
                         <th style="width: 60px;">관리</th>
                     </tr>
                 </thead>
@@ -613,13 +655,16 @@
                         ondragend="handleDragEnd(event)">
                         <td style="text-align: center;"><span class="drag-handle" title="드래그하여 순서 변경">☰</span></td>
                         <td class="row-num" th:text="${stat.index + 1}">1</td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" class="row-checkbox" onclick="toggleRowCheck(this)">
+                        </td>
                         <td>
                             <input type="text" class="edit-input" th:value="${order.name}"
                                 th:attr="data-index=${stat.index}, data-field='name'" onchange="updateOrderData(this)">
                         </td>
                         <td>
                             <div class="address-cell">
-                                <input type="text" class="edit-input address-text" th:value="${order.address}"
+                                <input type="text" class="edit-input address-text" lang="ko" th:value="${order.address}"
                                     th:style="${order.addressValid == false ? 'color: red; font-weight: bold;' : ''}"
                                     th:attr="data-index=${stat.index}, data-field='address'"
                                     onchange="updateOrderData(this)">
@@ -655,7 +700,7 @@
         <div class="modal">
             <h3>주소 검색</h3>
             <div class="search-input-group">
-                <input type="text" id="addressSearchInput" placeholder="주소를 입력하세요 (예: 흑석로, 대대리 737-2)"
+                <input type="text" id="addressSearchInput" lang="ko" placeholder="주소를 입력하세요 (예: 흑석로, 대대리 737-2)"
                     onkeydown="if(event.key==='Enter') searchAddress()">
                 <button type="button" class="btn-modal-search" onclick="searchAddress()">검색</button>
             </div>
@@ -671,7 +716,40 @@
         </div>
     </div>
 
+    <div class="korean-toast" id="koreanToast">한글로 입력해주세요</div>
+
     <script>
+        // 한글 입력 안내 토스트
+        (function() {
+            let toastTimer = null;
+            const englishOnly = /^[a-zA-Z]+$/;
+
+            function showKoreanToast() {
+                const toast = document.getElementById('koreanToast');
+                if (!toast) return;
+                toast.classList.add('show');
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(function() {
+                    toast.classList.remove('show');
+                }, 3000);
+            }
+
+            function checkKoreanInput(e) {
+                const val = e.target.value.replace(/[\s\d\-.,]/g, '');
+                if (val.length >= 2 && englishOnly.test(val)) {
+                    showKoreanToast();
+                }
+            }
+
+            document.addEventListener('input', function(e) {
+                if (e.target.classList.contains('address-text') ||
+                    e.target.id === 'addressSearchInput' ||
+                    e.target.id === 'manualAddressInput') {
+                    checkKoreanInput(e);
+                }
+            });
+        })();
+
         const fileInput = document.getElementById('fileInput');
         const submitBtn = document.getElementById('submitBtn');
         const dropzoneText = document.getElementById('dropzone-text');
@@ -773,11 +851,32 @@
             currentSearchIndex = parseInt(btn.getAttribute('data-index'));
             const address = btn.getAttribute('data-address') || '';
             document.getElementById('addressSearchInput').value = address;
-            document.getElementById('searchResults').innerHTML =
-                '<div class="search-status">도로명을 입력하고 검색 버튼을 눌러주세요.</div>';
+
+            // 보정 실패(빨간색) 주소인 경우 안내 메시지 + 자동 검색
+            const row = document.querySelector('tr[data-index="' + currentSearchIndex + '"]');
+            const addressInput = row ? row.querySelector('.address-text') : null;
+            const isInvalid = addressInput && addressInput.style.color === 'red';
+
+            if (isInvalid && address) {
+                const naverUrl = 'https://map.naver.com/p/search/' + encodeURIComponent(address);
+                document.getElementById('searchResults').innerHTML =
+                    '<div class="search-status" style="color: #dc3545;">' +
+                    '자동 보정에 실패한 주소입니다.<br>' +
+                    '<span style="font-size: 0.8rem; color: #666;">시/군/구를 포함하여 다시 검색하거나, 아래에서 직접 입력하세요.</span>' +
+                    '</div>' + buildFallbackHtml(naverUrl);
+            } else {
+                document.getElementById('searchResults').innerHTML =
+                    '<div class="search-status">도로명을 입력하고 검색 버튼을 눌러주세요.</div>';
+            }
+
             document.getElementById('searchPagination').style.display = 'none';
             document.getElementById('addressModal').classList.add('active');
             document.getElementById('addressSearchInput').focus();
+
+            // 보정 실패 주소는 자동 검색 실행
+            if (isInvalid && address) {
+                setTimeout(function() { searchAddress(); }, 300);
+            }
         }
 
         function closeAddressSearch() {
@@ -885,7 +984,7 @@
                 '네이버지도에서 검색' +
                 '</a>' +
                 '<div class="manual-input-group">' +
-                '<input type="text" id="manualAddressInput" ' +
+                '<input type="text" id="manualAddressInput" lang="ko" ' +
                 'placeholder="주소를 직접 입력하세요"' +
                 ' onkeydown="if(event.key===\'Enter\') applyManualAddress()">' +
                 '<button type="button" class="btn-manual-apply" onclick="applyManualAddress()">적용</button>' +
@@ -1000,6 +1099,7 @@
                     const tbody = document.getElementById('resultTableBody');
 
                     reindexRows();
+                    updateCheckAllState();
 
                     const totalStrong = document.querySelector('.alert-success strong');
                     if (totalStrong) totalStrong.textContent = orders.length;
@@ -1167,6 +1267,27 @@
                 const delBtn = tr.querySelector('.btn-delete');
                 if (delBtn) delBtn.setAttribute('data-index', i);
             });
+        }
+
+        // === 체크박스(책갈피) 기능 ===
+        function toggleRowCheck(checkbox) {
+            const tr = checkbox.closest('tr');
+            tr.classList.toggle('row-checked', checkbox.checked);
+            updateCheckAllState();
+        }
+
+        function toggleAllCheckboxes(headerCheckbox) {
+            document.querySelectorAll('#resultTableBody .row-checkbox').forEach(cb => {
+                cb.checked = headerCheckbox.checked;
+                cb.closest('tr').classList.toggle('row-checked', headerCheckbox.checked);
+            });
+        }
+
+        function updateCheckAllState() {
+            const checkAll = document.getElementById('checkAll');
+            if (!checkAll) return;
+            const boxes = document.querySelectorAll('#resultTableBody .row-checkbox');
+            checkAll.checked = boxes.length > 0 && Array.from(boxes).every(cb => cb.checked);
         }
     </script>
 </body>
