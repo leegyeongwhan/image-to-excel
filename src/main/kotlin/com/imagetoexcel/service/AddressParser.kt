@@ -22,6 +22,11 @@ class AddressParser {
         return KoreanRegion.containsAny(address) && detailUnitPattern.containsMatchIn(address)
     }
 
+    /** 주소에 행정구역(시/도/군/구/면/읍)이 포함되어 있는지 확인합니다. */
+    fun hasAdminContext(address: String): Boolean {
+        return Regex("[가-힣]+(?:특별자치도|특별시|광역시|도|시|군|구|면|읍)(?:\\s|$)").containsMatchIn(address)
+    }
+
     // ========================
     // 주소 정규화 (원본 → 검색 가능한 형태)
     // ========================

@@ -5,6 +5,7 @@ import com.imagetoexcel.infrastructure.JusoApiClient
 import com.imagetoexcel.infrastructure.JusoAddress
 import com.imagetoexcel.infrastructure.JusoSearchResult
 import com.imagetoexcel.infrastructure.NaverGeocodingClient
+import com.imagetoexcel.service.ReferenceDataService
 import com.imagetoexcel.service.UploadService
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseBody
 import org.springframework.web.multipart.MultipartFile
@@ -22,7 +24,8 @@ class UploadController(
     private val uploadService: UploadService,
     private val apiUsageTracker: ApiUsageTracker,
     private val jusoApiClient: JusoApiClient,
-    private val naverGeocodingClient: NaverGeocodingClient
+    private val naverGeocodingClient: NaverGeocodingClient,
+    private val referenceDataService: ReferenceDataService
 ) {
 
     @GetMapping("/")
@@ -86,6 +89,46 @@ class UploadController(
             zipNo = ""
         )
         return JusoSearchResult(totalCount = 1, addresses = listOf(address))
+    }
+
+    // ========================
+    // 참조 데이터 (그린부동산 원장 등)
+    // ========================
+
+    @PostMapping("/api/reference/upload")
+    @ResponseBody
+    fun uploadReference(@RequestParam("file") file: MultipartFile): Map<String, Any> {
+        val count = referenceDataService.load(file)
+        return mapOf("success" to true, "count" to count, "fileName" to (file.originalFilename ?: ""))
+    }
+
+    @GetMapping("/api/reference/status")
+    @ResponseBody
+    fun referenceStatus(): Map<String, Any?> {
+        return mapOf(
+            "loaded" to referenceDataService.isLoaded(),
+            "count" to referenceDataService.getCount(),
+            "fileName" to referenceDataService.loadedFileName
+        )
+    }
+
+    @GetMapping("/api/reference/lookup")
+    @ResponseBody
+    fun lookupByPhone(@RequestParam("phone") phone: String): Map<String, Any?> {
+        val info = referenceDataService.lookup(phone)
+            ?: return mapOf("found" to false)
+        return mapOf("found" to true, "name" to info.name, "address" to info.address, "phone" to info.phone)
+    }
+
+    /** 여러 전화번호를 한 번에 조회 (프론트에서 일괄 매칭 시 사용) */
+    @PostMapping("/api/reference/lookup-batch")
+    @ResponseBody
+    fun lookupBatch(@RequestBody phones: List<String>): Map<String, Any> {
+        val results = referenceDataService.lookupBatch(phones)
+        val mapped = results.map { (phone, info) ->
+            phone to mapOf("name" to info.name, "address" to info.address, "phone" to info.phone)
+        }.toMap()
+        return mapOf("matches" to mapped, "matchCount" to results.size)
     }
 
     @PostMapping("/download")

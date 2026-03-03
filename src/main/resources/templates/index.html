@@ -579,6 +579,125 @@
         .result-table tbody tr.row-checked .edit-input {
             color: #999;
         }
+
+        /* 참조 DB 관련 스타일 */
+        .ref-section {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            border: 1px solid #e9ecef;
+            flex-wrap: wrap;
+        }
+
+        .ref-section label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #495057;
+            white-space: nowrap;
+        }
+
+        .btn-ref-upload {
+            background: #6f42c1;
+            color: white;
+            border: none;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            white-space: nowrap;
+        }
+
+        .btn-ref-upload:hover {
+            background: #5a32a3;
+        }
+
+        .btn-ref-match {
+            background: #fd7e14;
+            color: white;
+            border: none;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            white-space: nowrap;
+        }
+
+        .btn-ref-match:hover {
+            background: #e8590c;
+        }
+
+        .btn-ref-match:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .ref-status {
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .ref-status.loaded {
+            color: #28a745;
+            font-weight: 500;
+        }
+
+        .ref-file-input {
+            display: none;
+        }
+
+        .ref-match-result {
+            font-size: 0.78rem;
+            color: #6f42c1;
+            font-weight: 500;
+        }
+
+        /* DB 매칭 행 표시 */
+        .db-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #a5d6a7;
+            border-radius: 3px;
+            padding: 1px 5px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .db-badge:hover {
+            background: #c8e6c9;
+            border-color: #66bb6a;
+        }
+
+        .db-badge.applied {
+            background: #fff3e0;
+            color: #e65100;
+            border-color: #ffcc80;
+            animation: db-pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes db-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .name-cell {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .name-cell .edit-input {
+            flex: 1;
+        }
     </style>
 </head>
 
@@ -633,6 +752,19 @@
                 현재 총 <strong th:text="${#lists.size(orders)}">0</strong>건의 주문 정보가 목록에 있습니다.
             </div>
 
+            <div class="ref-section">
+                <label>📋 참조 DB</label>
+                <input type="file" class="ref-file-input" id="refFileInput" accept=".xlsx,.xls,.xlsm">
+                <button type="button" class="btn-ref-upload" onclick="document.getElementById('refFileInput').click()">
+                    엑셀 업로드
+                </button>
+                <span class="ref-status" id="refStatus">확인 중...</span>
+                <button type="button" class="btn-ref-match" id="btnRefMatch" disabled onclick="matchFromReference()">
+                    DB 전체매칭
+                </button>
+                <span class="ref-match-result" id="refMatchResult"></span>
+            </div>
+
             <table class="result-table" id="resultTable">
                 <thead>
                     <tr>
@@ -659,8 +791,11 @@
                             <input type="checkbox" class="row-checkbox" onclick="toggleRowCheck(this)">
                         </td>
                         <td>
-                            <input type="text" class="edit-input" th:value="${order.name}"
-                                th:attr="data-index=${stat.index}, data-field='name'" onchange="updateOrderData(this)">
+                            <div class="name-cell">
+                                <input type="text" class="edit-input" th:value="${order.name}"
+                                    th:attr="data-index=${stat.index}, data-field='name'" onchange="updateOrderData(this)">
+                                <span class="db-badge-slot" th:attr="data-index=${stat.index}"></span>
+                            </div>
                         </td>
                         <td>
                             <div class="address-cell">
@@ -1266,6 +1401,10 @@
                 // 삭제 버튼 인덱스 업데이트
                 const delBtn = tr.querySelector('.btn-delete');
                 if (delBtn) delBtn.setAttribute('data-index', i);
+
+                // DB 배지 슬롯 인덱스 업데이트
+                const dbSlot = tr.querySelector('.db-badge-slot');
+                if (dbSlot) dbSlot.setAttribute('data-index', i);
             });
         }
 
@@ -1288,6 +1427,286 @@
             if (!checkAll) return;
             const boxes = document.querySelectorAll('#resultTableBody .row-checkbox');
             checkAll.checked = boxes.length > 0 && Array.from(boxes).every(cb => cb.checked);
+        }
+
+        // === 참조 DB (그린부동산 원장 등) ===
+        // DB 매칭 결과 캐시 (phone → {name, address})
+        var dbMatchCache = {};
+        var dbOriginalData = {};  // OCR 원본 데이터 저장 {idx: {name, address, addressValid}}
+
+        // 1) 페이지 로드 시 DB 상태 자동 확인
+        (function() {
+            const status = document.getElementById('refStatus');
+            const btnMatch = document.getElementById('btnRefMatch');
+            if (!status) return;
+
+            fetch('/api/reference/status')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.loaded) {
+                        const cnt = Number(data.count).toLocaleString();
+                        status.textContent = '✓ ' + (data.fileName || 'DB') + ' (' + cnt + '건 로드됨)';
+                        status.className = 'ref-status loaded';
+                        if (btnMatch) btnMatch.disabled = false;
+                        // DB가 이미 로드되어 있으면 자동으로 행별 매칭 표시
+                        scanDbMatches();
+                    } else {
+                        status.textContent = 'DB 없음 — 엑셀 업로드 필요';
+                        status.className = 'ref-status';
+                    }
+                })
+                .catch(() => {
+                    status.textContent = '상태 확인 실패';
+                });
+        })();
+
+        // 2) 엑셀 업로드 핸들러
+        (function() {
+            const refInput = document.getElementById('refFileInput');
+            if (!refInput) return;
+
+            refInput.addEventListener('change', function() {
+                if (!this.files.length) return;
+                const file = this.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const status = document.getElementById('refStatus');
+                status.textContent = '업로드 중... (대용량 파일은 시간이 걸릴 수 있습니다)';
+                status.className = 'ref-status';
+
+                fetch('/api/reference/upload', { method: 'POST', body: formData })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            const cnt = Number(data.count).toLocaleString();
+                            status.textContent = '✓ ' + data.fileName + ' (' + cnt + '건 로드 — 영구 저장됨)';
+                            status.className = 'ref-status loaded';
+                            document.getElementById('btnRefMatch').disabled = false;
+                            dbMatchCache = {};
+                            scanDbMatches();
+                        } else {
+                            status.textContent = '로드 실패';
+                            status.className = 'ref-status';
+                        }
+                    })
+                    .catch(err => {
+                        status.textContent = '오류: ' + err.message;
+                        status.className = 'ref-status';
+                    });
+            });
+        })();
+
+        // 3) 행별 DB 매칭 스캔 — 배치 API로 한 번에 조회
+        function scanDbMatches() {
+            const jsonInput = document.getElementById('ordersJsonInput');
+            if (!jsonInput) return;
+
+            let orders;
+            try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
+
+            // 전화번호 수집
+            const phones = orders.map(o => o.phone || '').filter(p => p.trim() !== '');
+            if (phones.length === 0) return;
+
+            fetch('/api/reference/lookup-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(phones)
+            })
+            .then(res => res.json())
+            .then(data => {
+                dbMatchCache = data.matches || {};
+                // OCR 원본 데이터 저장 + 각 행에 DB 배지 표시
+                orders.forEach((order, idx) => {
+                    const phone = order.phone || '';
+                    const match = dbMatchCache[phone];
+                    const slot = document.querySelector('.db-badge-slot[data-index="' + idx + '"]');
+                    if (!slot) return;
+
+                    if (match) {
+                        // OCR 원본 저장 (최초 1회만)
+                        if (!dbOriginalData[idx]) {
+                            dbOriginalData[idx] = {
+                                name: order.name || '',
+                                address: order.address || '',
+                                addressValid: order.addressValid
+                            };
+                        }
+                        renderDbBadge(idx, false);
+                    } else {
+                        slot.innerHTML = '';
+                    }
+                });
+
+                if (data.matchCount > 0) {
+                    const resultSpan = document.getElementById('refMatchResult');
+                    if (resultSpan) resultSpan.textContent = data.matchCount + '건 DB 매칭 발견';
+                }
+            })
+            .catch(() => {});
+        }
+
+        // DB 배지 렌더링 (applied: true=적용상태, false=미적용상태)
+        function renderDbBadge(idx, applied) {
+            const slot = document.querySelector('.db-badge-slot[data-index="' + idx + '"]');
+            if (!slot) return;
+
+            const jsonInput = document.getElementById('ordersJsonInput');
+            let orders;
+            try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
+            const phone = orders[idx].phone || '';
+            const match = dbMatchCache[phone];
+            if (!match) return;
+
+            if (applied) {
+                slot.innerHTML = '<span class="db-badge applied" onclick="toggleDbMatch(' + idx + ')" ' +
+                    'title="클릭하면 OCR 원본으로 복원">↩원복</span>';
+            } else {
+                slot.innerHTML = '<span class="db-badge" onclick="toggleDbMatch(' + idx + ')" ' +
+                    'title="DB: ' + escapeHtml(match.name) + ' / ' + escapeHtml(match.address) + '">📋DB</span>';
+            }
+        }
+
+        // 4) 토글: DB 적용 ↔ OCR 원복
+        function toggleDbMatch(idx) {
+            const jsonInput = document.getElementById('ordersJsonInput');
+            if (!jsonInput) return;
+
+            let orders;
+            try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
+
+            const phone = orders[idx].phone || '';
+            const match = dbMatchCache[phone];
+            const original = dbOriginalData[idx];
+            if (!match || !original) return;
+
+            // 현재 상태 확인: DB 데이터가 적용된 상태인지?
+            const isCurrentlyApplied = orders[idx]._dbApplied === true;
+
+            if (!isCurrentlyApplied) {
+                // === DB 데이터 적용 ===
+                if (match.name) {
+                    orders[idx].name = match.name;
+                    updateRowUI(idx, 'name', match.name);
+                }
+                if (match.address) {
+                    orders[idx].address = match.address;
+                    orders[idx].addressValid = true;
+                    updateRowUI(idx, 'address', match.address);
+                    setAddressStyle(idx, false); // 빨간색 해제
+                }
+                orders[idx]._dbApplied = true;
+                renderDbBadge(idx, true);
+            } else {
+                // === OCR 원본으로 복원 ===
+                orders[idx].name = original.name;
+                orders[idx].address = original.address;
+                orders[idx].addressValid = original.addressValid;
+                updateRowUI(idx, 'name', original.name);
+                updateRowUI(idx, 'address', original.address);
+                setAddressStyle(idx, original.addressValid === false); // 원래 빨간색이었으면 복원
+                orders[idx]._dbApplied = false;
+                renderDbBadge(idx, false);
+            }
+
+            // JSON 업데이트
+            const newJson = JSON.stringify(orders);
+            jsonInput.value = newJson;
+            const existingJsonInput = document.getElementById('existingOrdersJsonInput');
+            if (existingJsonInput) existingJsonInput.value = newJson;
+        }
+
+        // 주소 셀 스타일 변경 (빨간색 on/off)
+        function setAddressStyle(idx, isRed) {
+            const row = document.querySelector('tr[data-index="' + idx + '"]');
+            if (!row) return;
+            const addrInput = row.querySelector('.address-text');
+            if (addrInput) {
+                addrInput.style.color = isRed ? 'red' : '';
+                addrInput.style.fontWeight = isRed ? 'bold' : 'normal';
+            }
+        }
+
+        // 5) 전체 매칭 — 이름 빈칸 + 주소 빨간색인 행만 일괄 적용 (토글 호환)
+        function matchFromReference() {
+            const jsonInput = document.getElementById('ordersJsonInput');
+            if (!jsonInput) return;
+
+            let orders;
+            try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
+
+            const resultSpan = document.getElementById('refMatchResult');
+            resultSpan.textContent = '전체 매칭 중...';
+
+            const phones = orders.map(o => o.phone || '').filter(p => p.trim() !== '');
+
+            fetch('/api/reference/lookup-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(phones)
+            })
+            .then(res => res.json())
+            .then(data => {
+                dbMatchCache = data.matches || {};
+                let applyCount = 0;
+
+                orders.forEach((order, idx) => {
+                    const phone = order.phone || '';
+                    const match = dbMatchCache[phone];
+                    if (!match) return;
+                    if (order._dbApplied) return; // 이미 적용된 행은 스킵
+
+                    // OCR 원본 저장
+                    if (!dbOriginalData[idx]) {
+                        dbOriginalData[idx] = {
+                            name: order.name || '',
+                            address: order.address || '',
+                            addressValid: order.addressValid
+                        };
+                    }
+
+                    // DB 데이터로 교체 (이름/주소 모두)
+                    if (match.name) {
+                        orders[idx].name = match.name;
+                        updateRowUI(idx, 'name', match.name);
+                    }
+                    if (match.address) {
+                        orders[idx].address = match.address;
+                        orders[idx].addressValid = true;
+                        updateRowUI(idx, 'address', match.address);
+                        setAddressStyle(idx, false);
+                    }
+                    applyCount++;
+                    orders[idx]._dbApplied = true;
+                    renderDbBadge(idx, true);
+                });
+
+                // JSON 업데이트
+                const newJson = JSON.stringify(orders);
+                jsonInput.value = newJson;
+                const existingJsonInput = document.getElementById('existingOrdersJsonInput');
+                if (existingJsonInput) existingJsonInput.value = newJson;
+
+                resultSpan.textContent = applyCount > 0
+                    ? '✓ ' + applyCount + '건 적용 (↩원복 가능)'
+                    : '적용할 항목 없음';
+            })
+            .catch(err => {
+                resultSpan.textContent = '오류: ' + err.message;
+            });
+        }
+
+        function updateRowUI(idx, field, value) {
+            const row = document.querySelector('tr[data-index="' + idx + '"]');
+            if (!row) return;
+            const input = row.querySelector('.edit-input[data-field="' + field + '"]');
+            if (input) input.value = value;
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
     </script>
 </body>
