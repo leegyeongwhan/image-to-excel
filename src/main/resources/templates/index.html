@@ -698,6 +698,10 @@
         .name-cell .edit-input {
             flex: 1;
         }
+
+        .db-badge-slot-addr {
+            flex-shrink: 0;
+        }
     </style>
 </head>
 
@@ -803,6 +807,7 @@
                                     th:style="${order.addressValid == false ? 'color: red; font-weight: bold;' : ''}"
                                     th:attr="data-index=${stat.index}, data-field='address'"
                                     onchange="updateOrderData(this)">
+                                <span class="db-badge-slot-addr" th:attr="data-index=${stat.index}"></span>
                                 <button type="button" class="btn-search"
                                     th:attr="data-index=${stat.index},data-address=${order.address}"
                                     onclick="openAddressSearch(this)">
@@ -1405,6 +1410,10 @@
                 // DB 배지 슬롯 인덱스 업데이트
                 const dbSlot = tr.querySelector('.db-badge-slot');
                 if (dbSlot) dbSlot.setAttribute('data-index', i);
+
+                // 주소 DB 배지 슬롯 인덱스 업데이트
+                const dbSlotAddr = tr.querySelector('.db-badge-slot-addr');
+                if (dbSlotAddr) dbSlotAddr.setAttribute('data-index', i);
             });
         }
 
@@ -1534,8 +1543,11 @@
                             };
                         }
                         renderDbBadge(idx, false);
+                        renderDbBadgeAddr(idx, false);
                     } else {
                         slot.innerHTML = '';
+                        var addrSlot = document.querySelector('.db-badge-slot-addr[data-index="' + idx + '"]');
+                        if (addrSlot) addrSlot.innerHTML = '';
                     }
                 });
 
@@ -1547,7 +1559,7 @@
             .catch(() => {});
         }
 
-        // DB 배지 렌더링 (applied: true=적용상태, false=미적용상태)
+        // 이름 DB 배지 렌더링 (applied: true=적용상태, false=미적용상태)
         function renderDbBadge(idx, applied) {
             const slot = document.querySelector('.db-badge-slot[data-index="' + idx + '"]');
             if (!slot) return;
@@ -1561,14 +1573,35 @@
 
             if (applied) {
                 slot.innerHTML = '<span class="db-badge applied" onclick="toggleDbMatch(' + idx + ')" ' +
-                    'title="클릭하면 OCR 원본으로 복원">↩원복</span>';
+                    'title="클릭하면 이름을 OCR 원본으로 복원">↩원복</span>';
             } else {
                 slot.innerHTML = '<span class="db-badge" onclick="toggleDbMatch(' + idx + ')" ' +
-                    'title="DB: ' + escapeHtml(match.name) + ' / ' + escapeHtml(match.address) + '">📋DB</span>';
+                    'title="DB 이름: ' + escapeHtml(match.name) + '">📋DB</span>';
             }
         }
 
-        // 4) 토글: DB 적용 ↔ OCR 원복
+        // 주소 DB 배지 렌더링
+        function renderDbBadgeAddr(idx, applied) {
+            const slot = document.querySelector('.db-badge-slot-addr[data-index="' + idx + '"]');
+            if (!slot) return;
+
+            const jsonInput = document.getElementById('ordersJsonInput');
+            let orders;
+            try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
+            const phone = orders[idx].phone || '';
+            const match = dbMatchCache[phone];
+            if (!match || !match.address) { slot.innerHTML = ''; return; }
+
+            if (applied) {
+                slot.innerHTML = '<span class="db-badge applied" onclick="toggleDbMatchAddr(' + idx + ')" ' +
+                    'title="클릭하면 주소를 OCR 원본으로 복원">↩원복</span>';
+            } else {
+                slot.innerHTML = '<span class="db-badge" onclick="toggleDbMatchAddr(' + idx + ')" ' +
+                    'title="DB 주소: ' + escapeHtml(match.address) + '">📋DB</span>';
+            }
+        }
+
+        // 4) 이름 토글: 📋DB 클릭 시 이름+주소 같이 적용 (기본), ↩원복 클릭 시 이름만 복원
         function toggleDbMatch(idx) {
             const jsonInput = document.getElementById('ordersJsonInput');
             if (!jsonInput) return;
@@ -1581,39 +1614,80 @@
             const original = dbOriginalData[idx];
             if (!match || !original) return;
 
-            // 현재 상태 확인: DB 데이터가 적용된 상태인지?
-            const isCurrentlyApplied = orders[idx]._dbApplied === true;
+            const nameApplied = orders[idx]._dbNameApplied === true;
 
-            if (!isCurrentlyApplied) {
-                // === DB 데이터 적용 ===
+            if (!nameApplied) {
+                // === DB 데이터 적용: 이름 + 주소 같이 (기본 동작) ===
                 if (match.name) {
                     orders[idx].name = match.name;
                     updateRowUI(idx, 'name', match.name);
                 }
-                if (match.address) {
+                orders[idx]._dbNameApplied = true;
+                renderDbBadge(idx, true);
+
+                // 주소도 같이 적용 (기본은 같이바뀐다)
+                if (match.address && !orders[idx]._dbAddrApplied) {
                     orders[idx].address = match.address;
                     orders[idx].addressValid = true;
                     updateRowUI(idx, 'address', match.address);
-                    setAddressStyle(idx, false); // 빨간색 해제
+                    setAddressStyle(idx, false);
+                    orders[idx]._dbAddrApplied = true;
+                    renderDbBadgeAddr(idx, true);
                 }
-                orders[idx]._dbApplied = true;
-                renderDbBadge(idx, true);
             } else {
-                // === OCR 원본으로 복원 ===
+                // === 이름만 OCR 원본으로 복원 ===
                 orders[idx].name = original.name;
-                orders[idx].address = original.address;
-                orders[idx].addressValid = original.addressValid;
                 updateRowUI(idx, 'name', original.name);
-                updateRowUI(idx, 'address', original.address);
-                setAddressStyle(idx, original.addressValid === false); // 원래 빨간색이었으면 복원
-                orders[idx]._dbApplied = false;
+                orders[idx]._dbNameApplied = false;
                 renderDbBadge(idx, false);
             }
 
             // JSON 업데이트
-            const newJson = JSON.stringify(orders);
+            var newJson = JSON.stringify(orders);
             jsonInput.value = newJson;
-            const existingJsonInput = document.getElementById('existingOrdersJsonInput');
+            var existingJsonInput = document.getElementById('existingOrdersJsonInput');
+            if (existingJsonInput) existingJsonInput.value = newJson;
+        }
+
+        // 4-2) 주소 토글: 📋DB 클릭 시 주소만 적용, ↩원복 클릭 시 주소만 복원
+        function toggleDbMatchAddr(idx) {
+            const jsonInput = document.getElementById('ordersJsonInput');
+            if (!jsonInput) return;
+
+            let orders;
+            try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
+
+            const phone = orders[idx].phone || '';
+            const match = dbMatchCache[phone];
+            const original = dbOriginalData[idx];
+            if (!match || !original) return;
+
+            const addrApplied = orders[idx]._dbAddrApplied === true;
+
+            if (!addrApplied) {
+                // === 주소만 DB 데이터 적용 ===
+                if (match.address) {
+                    orders[idx].address = match.address;
+                    orders[idx].addressValid = true;
+                    updateRowUI(idx, 'address', match.address);
+                    setAddressStyle(idx, false);
+                }
+                orders[idx]._dbAddrApplied = true;
+                renderDbBadgeAddr(idx, true);
+            } else {
+                // === 주소만 OCR 원본으로 복원 ===
+                orders[idx].address = original.address;
+                orders[idx].addressValid = original.addressValid;
+                updateRowUI(idx, 'address', original.address);
+                setAddressStyle(idx, original.addressValid === false);
+                orders[idx]._dbAddrApplied = false;
+                renderDbBadgeAddr(idx, false);
+            }
+
+            // JSON 업데이트
+            var newJson = JSON.stringify(orders);
+            jsonInput.value = newJson;
+            var existingJsonInput = document.getElementById('existingOrdersJsonInput');
             if (existingJsonInput) existingJsonInput.value = newJson;
         }
 
@@ -1628,7 +1702,7 @@
             }
         }
 
-        // 5) 전체 매칭 — 이름 빈칸 + 주소 빨간색인 행만 일괄 적용 (토글 호환)
+        // 5) 전체 매칭 — 이름+주소 일괄 적용 (개별 원복 가능)
         function matchFromReference() {
             const jsonInput = document.getElementById('ordersJsonInput');
             if (!jsonInput) return;
@@ -1655,7 +1729,8 @@
                     const phone = order.phone || '';
                     const match = dbMatchCache[phone];
                     if (!match) return;
-                    if (order._dbApplied) return; // 이미 적용된 행은 스킵
+                    // 이름과 주소 모두 이미 적용된 행은 스킵
+                    if (order._dbNameApplied && order._dbAddrApplied) return;
 
                     // OCR 원본 저장
                     if (!dbOriginalData[idx]) {
@@ -1666,20 +1741,23 @@
                         };
                     }
 
-                    // DB 데이터로 교체 (이름/주소 모두)
-                    if (match.name) {
+                    // 이름 DB 데이터로 교체
+                    if (match.name && !order._dbNameApplied) {
                         orders[idx].name = match.name;
                         updateRowUI(idx, 'name', match.name);
+                        orders[idx]._dbNameApplied = true;
+                        renderDbBadge(idx, true);
                     }
-                    if (match.address) {
+                    // 주소 DB 데이터로 교체
+                    if (match.address && !order._dbAddrApplied) {
                         orders[idx].address = match.address;
                         orders[idx].addressValid = true;
                         updateRowUI(idx, 'address', match.address);
                         setAddressStyle(idx, false);
+                        orders[idx]._dbAddrApplied = true;
+                        renderDbBadgeAddr(idx, true);
                     }
                     applyCount++;
-                    orders[idx]._dbApplied = true;
-                    renderDbBadge(idx, true);
                 });
 
                 // JSON 업데이트
