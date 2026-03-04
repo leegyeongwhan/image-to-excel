@@ -149,7 +149,8 @@ class ReferenceDataService {
         }
 
         workbook.close()
-        return map
+        // 엑셀 아래쪽(최신) 데이터가 리스트 앞에 오도록 역순
+        return map.mapValues { (_, list) -> list.reversed() }
     }
 
     // ========================
