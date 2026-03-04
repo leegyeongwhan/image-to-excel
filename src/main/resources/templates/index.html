@@ -20,7 +20,7 @@
         }
 
         .container {
-            max-width: 1100px;
+            max-width: 1400px;
             margin: 0 auto;
         }
 
@@ -702,6 +702,73 @@
         .db-badge-slot-addr {
             flex-shrink: 0;
         }
+
+        /* DB 선택 모달 */
+        .db-select-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+        }
+        .db-select-overlay.show { display: flex; }
+        .db-select-box {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            padding: 1.5rem;
+            min-width: 420px;
+            max-width: 600px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .db-select-box h3 {
+            margin: 0 0 1rem 0;
+            font-size: 1.1rem;
+            color: #333;
+        }
+        .db-select-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .db-select-item:hover { border-color: #4CAF50; background: #f8fff8; }
+        .db-select-item.selected { border-color: #4CAF50; background: #e8f5e9; }
+        .db-select-item input[type="radio"] { margin-top: 3px; accent-color: #4CAF50; }
+        .db-select-info { flex: 1; }
+        .db-select-info .db-sel-name { font-weight: bold; color: #333; }
+        .db-select-info .db-sel-addr { color: #666; font-size: 0.9em; margin-top: 2px; }
+        .db-select-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 1rem;
+            justify-content: flex-end;
+        }
+        .db-select-actions button {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+        .btn-db-select-apply {
+            background: #4CAF50;
+            color: #fff;
+        }
+        .btn-db-select-apply:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-db-select-cancel {
+            background: #f5f5f5;
+            color: #333;
+            border: 1px solid #ddd !important;
+        }
     </style>
 </head>
 
@@ -778,9 +845,9 @@
                             <input type="checkbox" class="row-checkbox" id="checkAll"
                                 onclick="toggleAllCheckboxes(this)" title="전체 선택/해제">
                         </th>
-                        <th style="width: 12%;">이름</th>
-                        <th style="width: 55%;">주소</th>
-                        <th style="width: 12%;">전화번호</th>
+                        <th style="width: 15%;">이름</th>
+                        <th style="width: 48%;">주소</th>
+                        <th style="width: 17%;">전화번호</th>
                         <th style="width: 60px;">관리</th>
                     </tr>
                 </thead>
@@ -1439,9 +1506,10 @@
         }
 
         // === 참조 DB (그린부동산 원장 등) ===
-        // DB 매칭 결과 캐시 (phone → {name, address})
+        // DB 매칭 결과 캐시 (phone → [{name, address, phone}, ...])  ← 배열!
         var dbMatchCache = {};
         var dbOriginalData = {};  // OCR 원본 데이터 저장 {idx: {name, address, addressValid}}
+        var _dbSelectIdx = null;  // 선택 모달용 현재 행 인덱스
 
         // 1) 페이지 로드 시 DB 상태 자동 확인
         (function() {
@@ -1457,7 +1525,6 @@
                         status.textContent = '✓ ' + (data.fileName || 'DB') + ' (' + cnt + '건 로드됨)';
                         status.className = 'ref-status loaded';
                         if (btnMatch) btnMatch.disabled = false;
-                        // DB가 이미 로드되어 있으면 자동으로 행별 매칭 표시
                         scanDbMatches();
                     } else {
                         status.textContent = 'DB 없음 — 엑셀 업로드 필요';
@@ -1514,7 +1581,6 @@
             let orders;
             try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
 
-            // 전화번호 수집
             const phones = orders.map(o => o.phone || '').filter(p => p.trim() !== '');
             if (phones.length === 0) return;
 
@@ -1526,15 +1592,13 @@
             .then(res => res.json())
             .then(data => {
                 dbMatchCache = data.matches || {};
-                // OCR 원본 데이터 저장 + 각 행에 DB 배지 표시
                 orders.forEach((order, idx) => {
                     const phone = order.phone || '';
-                    const match = dbMatchCache[phone];
+                    const matchList = dbMatchCache[phone];  // 배열
                     const slot = document.querySelector('.db-badge-slot[data-index="' + idx + '"]');
                     if (!slot) return;
 
-                    if (match) {
-                        // OCR 원본 저장 (최초 1회만)
+                    if (matchList && matchList.length > 0) {
                         if (!dbOriginalData[idx]) {
                             dbOriginalData[idx] = {
                                 name: order.name || '',
@@ -1559,7 +1623,17 @@
             .catch(() => {});
         }
 
-        // 이름 DB 배지 렌더링 (applied: true=적용상태, false=미적용상태)
+        /** 매칭 리스트에서 첫 번째 항목 반환 (편의) */
+        function getFirstMatch(phone) {
+            var list = dbMatchCache[phone];
+            return (list && list.length > 0) ? list[0] : null;
+        }
+        function getMatchCount(phone) {
+            var list = dbMatchCache[phone];
+            return list ? list.length : 0;
+        }
+
+        // 이름 DB 배지 렌더링
         function renderDbBadge(idx, applied) {
             const slot = document.querySelector('.db-badge-slot[data-index="' + idx + '"]');
             if (!slot) return;
@@ -1568,15 +1642,18 @@
             let orders;
             try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
             const phone = orders[idx].phone || '';
-            const match = dbMatchCache[phone];
-            if (!match) return;
+            const matchList = dbMatchCache[phone];
+            if (!matchList || matchList.length === 0) return;
+
+            const cnt = matchList.length;
+            const cntLabel = cnt > 1 ? '(' + cnt + ')' : '';
 
             if (applied) {
                 slot.innerHTML = '<span class="db-badge applied" onclick="toggleDbMatch(' + idx + ')" ' +
                     'title="클릭하면 이름을 OCR 원본으로 복원">↩원복</span>';
             } else {
                 slot.innerHTML = '<span class="db-badge" onclick="toggleDbMatch(' + idx + ')" ' +
-                    'title="DB 이름: ' + escapeHtml(match.name) + '">📋DB</span>';
+                    'title="DB ' + cnt + '건 매칭">📋DB' + cntLabel + '</span>';
             }
         }
 
@@ -1589,19 +1666,120 @@
             let orders;
             try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
             const phone = orders[idx].phone || '';
-            const match = dbMatchCache[phone];
-            if (!match || !match.address) { slot.innerHTML = ''; return; }
+            const matchList = dbMatchCache[phone];
+            if (!matchList || matchList.length === 0) { slot.innerHTML = ''; return; }
+
+            // 주소가 있는 항목이 1건이라도 있는지 확인
+            const hasAddr = matchList.some(m => m.address);
+            if (!hasAddr) { slot.innerHTML = ''; return; }
+
+            const cnt = matchList.length;
+            const cntLabel = cnt > 1 ? '(' + cnt + ')' : '';
 
             if (applied) {
                 slot.innerHTML = '<span class="db-badge applied" onclick="toggleDbMatchAddr(' + idx + ')" ' +
                     'title="클릭하면 주소를 OCR 원본으로 복원">↩원복</span>';
             } else {
                 slot.innerHTML = '<span class="db-badge" onclick="toggleDbMatchAddr(' + idx + ')" ' +
-                    'title="DB 주소: ' + escapeHtml(match.address) + '">📋DB</span>';
+                    'title="DB ' + cnt + '건 매칭">📋DB' + cntLabel + '</span>';
             }
         }
 
-        // 4) 이름 토글: 📋DB 클릭 시 이름+주소 같이 적용 (기본), ↩원복 클릭 시 이름만 복원
+        // === DB 선택 모달 ===
+        function openDbSelectModal(idx, matchList) {
+            _dbSelectIdx = idx;
+            var overlay = document.getElementById('dbSelectOverlay');
+            var title = document.getElementById('dbSelectTitle');
+            var list = document.getElementById('dbSelectList');
+            var btn = document.getElementById('btnDbSelectApply');
+
+            title.textContent = 'DB 매칭 선택 (' + matchList.length + '건)';
+            list.innerHTML = '';
+            btn.disabled = true;
+
+            matchList.forEach(function(m, i) {
+                var item = document.createElement('div');
+                item.className = 'db-select-item';
+                item.onclick = function() { selectDbItem(i); };
+                item.innerHTML = '<input type="radio" name="dbSelect" value="' + i + '">' +
+                    '<div class="db-select-info">' +
+                    '<div class="db-sel-name">' + escapeHtml(m.name) + '</div>' +
+                    '<div class="db-sel-addr">' + escapeHtml(m.address) + '</div>' +
+                    '</div>';
+                list.appendChild(item);
+            });
+
+            overlay.classList.add('show');
+        }
+
+        function selectDbItem(i) {
+            var items = document.querySelectorAll('#dbSelectList .db-select-item');
+            items.forEach(function(el, j) {
+                el.classList.toggle('selected', j === i);
+                el.querySelector('input[type="radio"]').checked = (j === i);
+            });
+            document.getElementById('btnDbSelectApply').disabled = false;
+        }
+
+        function closeDbSelectModal() {
+            document.getElementById('dbSelectOverlay').classList.remove('show');
+            _dbSelectIdx = null;
+        }
+
+        function applyDbSelection() {
+            var idx = _dbSelectIdx;
+            if (idx === null) return;
+
+            var selected = document.querySelector('#dbSelectList input[type="radio"]:checked');
+            if (!selected) return;
+            var selIdx = parseInt(selected.value);
+
+            var jsonInput = document.getElementById('ordersJsonInput');
+            var orders;
+            try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
+
+            var phone = orders[idx].phone || '';
+            var matchList = dbMatchCache[phone];
+            if (!matchList || !matchList[selIdx]) return;
+
+            var match = matchList[selIdx];
+
+            // OCR 원본 저장
+            if (!dbOriginalData[idx]) {
+                dbOriginalData[idx] = {
+                    name: orders[idx].name || '',
+                    address: orders[idx].address || '',
+                    addressValid: orders[idx].addressValid
+                };
+            }
+
+            // 이름 + 주소 적용
+            if (match.name) {
+                orders[idx].name = match.name;
+                updateRowUI(idx, 'name', match.name);
+            }
+            orders[idx]._dbNameApplied = true;
+            renderDbBadge(idx, true);
+
+            if (match.address) {
+                orders[idx].address = match.address;
+                orders[idx].addressValid = true;
+                updateRowUI(idx, 'address', match.address);
+                setAddressStyle(idx, false);
+            }
+            orders[idx]._dbAddrApplied = true;
+            renderDbBadgeAddr(idx, true);
+
+            // JSON 업데이트
+            var newJson = JSON.stringify(orders);
+            jsonInput.value = newJson;
+            var existingJsonInput = document.getElementById('existingOrdersJsonInput');
+            if (existingJsonInput) existingJsonInput.value = newJson;
+
+            closeDbSelectModal();
+        }
+
+        // 4) 이름 토글: 📋DB 클릭 → 1건이면 바로 적용, N건이면 선택 모달
         function toggleDbMatch(idx) {
             const jsonInput = document.getElementById('ordersJsonInput');
             if (!jsonInput) return;
@@ -1610,14 +1788,29 @@
             try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
 
             const phone = orders[idx].phone || '';
-            const match = dbMatchCache[phone];
-            const original = dbOriginalData[idx];
-            if (!match || !original) return;
+            const matchList = dbMatchCache[phone];
+            if (!matchList || matchList.length === 0) return;
 
             const nameApplied = orders[idx]._dbNameApplied === true;
 
             if (!nameApplied) {
-                // === DB 데이터 적용: 이름 + 주소 같이 (기본 동작) ===
+                // 아직 적용 안 된 상태
+                if (!dbOriginalData[idx]) {
+                    dbOriginalData[idx] = {
+                        name: orders[idx].name || '',
+                        address: orders[idx].address || '',
+                        addressValid: orders[idx].addressValid
+                    };
+                }
+
+                if (matchList.length > 1) {
+                    // N건 → 선택 모달
+                    openDbSelectModal(idx, matchList);
+                    return;
+                }
+
+                // 1건 → 바로 적용 (이름 + 주소)
+                var match = matchList[0];
                 if (match.name) {
                     orders[idx].name = match.name;
                     updateRowUI(idx, 'name', match.name);
@@ -1625,7 +1818,6 @@
                 orders[idx]._dbNameApplied = true;
                 renderDbBadge(idx, true);
 
-                // 주소도 같이 적용 (기본은 같이바뀐다)
                 if (match.address && !orders[idx]._dbAddrApplied) {
                     orders[idx].address = match.address;
                     orders[idx].addressValid = true;
@@ -1636,20 +1828,21 @@
                 }
             } else {
                 // === 이름만 OCR 원본으로 복원 ===
+                const original = dbOriginalData[idx];
+                if (!original) return;
                 orders[idx].name = original.name;
                 updateRowUI(idx, 'name', original.name);
                 orders[idx]._dbNameApplied = false;
                 renderDbBadge(idx, false);
             }
 
-            // JSON 업데이트
             var newJson = JSON.stringify(orders);
             jsonInput.value = newJson;
             var existingJsonInput = document.getElementById('existingOrdersJsonInput');
             if (existingJsonInput) existingJsonInput.value = newJson;
         }
 
-        // 4-2) 주소 토글: 📋DB 클릭 시 주소만 적용, ↩원복 클릭 시 주소만 복원
+        // 4-2) 주소 토글
         function toggleDbMatchAddr(idx) {
             const jsonInput = document.getElementById('ordersJsonInput');
             if (!jsonInput) return;
@@ -1658,14 +1851,26 @@
             try { orders = JSON.parse(jsonInput.value); } catch(e) { return; }
 
             const phone = orders[idx].phone || '';
-            const match = dbMatchCache[phone];
-            const original = dbOriginalData[idx];
-            if (!match || !original) return;
+            const matchList = dbMatchCache[phone];
+            if (!matchList || matchList.length === 0) return;
 
             const addrApplied = orders[idx]._dbAddrApplied === true;
 
             if (!addrApplied) {
-                // === 주소만 DB 데이터 적용 ===
+                if (!dbOriginalData[idx]) {
+                    dbOriginalData[idx] = {
+                        name: orders[idx].name || '',
+                        address: orders[idx].address || '',
+                        addressValid: orders[idx].addressValid
+                    };
+                }
+
+                if (matchList.length > 1) {
+                    openDbSelectModal(idx, matchList);
+                    return;
+                }
+
+                var match = matchList[0];
                 if (match.address) {
                     orders[idx].address = match.address;
                     orders[idx].addressValid = true;
@@ -1675,7 +1880,8 @@
                 orders[idx]._dbAddrApplied = true;
                 renderDbBadgeAddr(idx, true);
             } else {
-                // === 주소만 OCR 원본으로 복원 ===
+                const original = dbOriginalData[idx];
+                if (!original) return;
                 orders[idx].address = original.address;
                 orders[idx].addressValid = original.addressValid;
                 updateRowUI(idx, 'address', original.address);
@@ -1684,7 +1890,6 @@
                 renderDbBadgeAddr(idx, false);
             }
 
-            // JSON 업데이트
             var newJson = JSON.stringify(orders);
             jsonInput.value = newJson;
             var existingJsonInput = document.getElementById('existingOrdersJsonInput');
@@ -1702,7 +1907,7 @@
             }
         }
 
-        // 5) 전체 매칭 — 이름+주소 일괄 적용 (개별 원복 가능)
+        // 5) 전체 매칭 — 1건이면 자동 적용, N건이면 뱃지만 표시
         function matchFromReference() {
             const jsonInput = document.getElementById('ordersJsonInput');
             if (!jsonInput) return;
@@ -1724,15 +1929,14 @@
             .then(data => {
                 dbMatchCache = data.matches || {};
                 let applyCount = 0;
+                let multiCount = 0;
 
                 orders.forEach((order, idx) => {
                     const phone = order.phone || '';
-                    const match = dbMatchCache[phone];
-                    if (!match) return;
-                    // 이름과 주소 모두 이미 적용된 행은 스킵
+                    const matchList = dbMatchCache[phone];
+                    if (!matchList || matchList.length === 0) return;
                     if (order._dbNameApplied && order._dbAddrApplied) return;
 
-                    // OCR 원본 저장
                     if (!dbOriginalData[idx]) {
                         dbOriginalData[idx] = {
                             name: order.name || '',
@@ -1741,14 +1945,22 @@
                         };
                     }
 
-                    // 이름 DB 데이터로 교체
+                    if (matchList.length > 1) {
+                        // N건: 자동 적용 안 함, 뱃지만 표시
+                        renderDbBadge(idx, false);
+                        renderDbBadgeAddr(idx, false);
+                        multiCount++;
+                        return;
+                    }
+
+                    // 1건: 자동 적용
+                    var match = matchList[0];
                     if (match.name && !order._dbNameApplied) {
                         orders[idx].name = match.name;
                         updateRowUI(idx, 'name', match.name);
                         orders[idx]._dbNameApplied = true;
                         renderDbBadge(idx, true);
                     }
-                    // 주소 DB 데이터로 교체
                     if (match.address && !order._dbAddrApplied) {
                         orders[idx].address = match.address;
                         orders[idx].addressValid = true;
@@ -1760,15 +1972,16 @@
                     applyCount++;
                 });
 
-                // JSON 업데이트
                 const newJson = JSON.stringify(orders);
                 jsonInput.value = newJson;
                 const existingJsonInput = document.getElementById('existingOrdersJsonInput');
                 if (existingJsonInput) existingJsonInput.value = newJson;
 
-                resultSpan.textContent = applyCount > 0
-                    ? '✓ ' + applyCount + '건 적용 (↩원복 가능)'
-                    : '적용할 항목 없음';
+                var msg = '';
+                if (applyCount > 0) msg += '✓ ' + applyCount + '건 적용';
+                if (multiCount > 0) msg += (msg ? ', ' : '') + multiCount + '건 선택 필요 (📋DB 클릭)';
+                if (!msg) msg = '적용할 항목 없음';
+                resultSpan.textContent = msg;
             })
             .catch(err => {
                 resultSpan.textContent = '오류: ' + err.message;
@@ -1787,6 +2000,18 @@
             return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
     </script>
+
+    <!-- DB 다중 매칭 선택 모달 -->
+    <div class="db-select-overlay" id="dbSelectOverlay" onclick="if(event.target===this) closeDbSelectModal()">
+        <div class="db-select-box">
+            <h3 id="dbSelectTitle">DB 매칭 선택</h3>
+            <div id="dbSelectList"></div>
+            <div class="db-select-actions">
+                <button class="btn-db-select-cancel" onclick="closeDbSelectModal()">취소</button>
+                <button class="btn-db-select-apply" id="btnDbSelectApply" disabled onclick="applyDbSelection()">선택 적용</button>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>

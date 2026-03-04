@@ -115,20 +115,24 @@ class UploadController(
     @GetMapping("/api/reference/lookup")
     @ResponseBody
     fun lookupByPhone(@RequestParam("phone") phone: String): Map<String, Any?> {
-        val info = referenceDataService.lookup(phone)
-            ?: return mapOf("found" to false)
-        return mapOf("found" to true, "name" to info.name, "address" to info.address, "phone" to info.phone)
+        val infoList = referenceDataService.lookup(phone)
+        if (infoList.isEmpty()) return mapOf("found" to false)
+        return mapOf(
+            "found" to true,
+            "results" to infoList.map { mapOf("name" to it.name, "address" to it.address, "phone" to it.phone) }
+        )
     }
 
-    /** 여러 전화번호를 한 번에 조회 (프론트에서 일괄 매칭 시 사용) */
+    /** 여러 전화번호를 한 번에 조회 (프론트에서 일괄 매칭 시 사용, 1:N) */
     @PostMapping("/api/reference/lookup-batch")
     @ResponseBody
     fun lookupBatch(@RequestBody phones: List<String>): Map<String, Any> {
         val results = referenceDataService.lookupBatch(phones)
-        val mapped = results.map { (phone, info) ->
-            phone to mapOf("name" to info.name, "address" to info.address, "phone" to info.phone)
+        val mapped = results.map { (phone, infoList) ->
+            phone to infoList.map { mapOf("name" to it.name, "address" to it.address, "phone" to it.phone) }
         }.toMap()
-        return mapOf("matches" to mapped, "matchCount" to results.size)
+        val totalMatches = results.values.sumOf { it.size }
+        return mapOf("matches" to mapped, "matchCount" to totalMatches)
     }
 
     @PostMapping("/download")

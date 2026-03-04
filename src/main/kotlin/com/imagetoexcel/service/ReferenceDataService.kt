@@ -21,16 +21,20 @@ private val logger = KotlinLogging.logger {}
  *
  * 데이터는 data/ 폴더에 캐시 파일로 영구 저장되며,
  * 서버 재시작 시 자동으로 로드됩니다.
+ *
+ * 같은 전화번호에 여러 고객이 매핑될 수 있습니다 (1:N).
  */
 @Service
 class ReferenceDataService {
 
     data class CustomerInfo(val name: String, val address: String, val phone: String)
 
-    /** 전화번호(숫자만) → 고객 정보 */
-    private var customerMap: Map<String, CustomerInfo> = emptyMap()
+    /** 전화번호(숫자만) → 고객 정보 목록 (1:N), 스레드 간 가시성 보장 */
+    @Volatile
+    private var customerMap: Map<String, List<CustomerInfo>> = emptyMap()
 
     /** 로드된 파일명 */
+    @Volatile
     private var _loadedFileName: String? = null
     val loadedFileName: String? get() = _loadedFileName
 
@@ -43,7 +47,8 @@ class ReferenceDataService {
 
     fun isLoaded(): Boolean = customerMap.isNotEmpty()
 
-    fun getCount(): Int = customerMap.size
+    /** 전체 고유 전화번호 수 */
+    fun getCount(): Int = customerMap.values.sumOf { it.size }
 
     /** 서버 시작 시 캐시 파일이 있으면 자동 로드 */
     @PostConstruct
@@ -69,21 +74,22 @@ class ReferenceDataService {
 
         customerMap = map
         _loadedFileName = file.originalFilename
-        logger.info { "참조 데이터 로드 완료: ${map.size}건 (파일: ${file.originalFilename})" }
+        val totalEntries = map.values.sumOf { it.size }
+        logger.info { "참조 데이터 로드 완료: ${totalEntries}건 (전화번호 ${map.size}개, 파일: ${file.originalFilename})" }
 
         // 캐시 저장 (TSV 형식으로 빠르게 재로드 가능)
         saveToCache(map, file.originalFilename)
 
-        return map.size
+        return totalEntries
     }
 
-    /** 전화번호로 고객 정보를 조회합니다. */
-    fun lookup(phone: String): CustomerInfo? {
-        return customerMap[normalizePhone(phone)]
+    /** 전화번호로 고객 정보를 조회합니다 (여러 건 반환 가능). */
+    fun lookup(phone: String): List<CustomerInfo> {
+        return customerMap[normalizePhone(phone)] ?: emptyList()
     }
 
-    /** 여러 전화번호를 일괄 조회합니다. */
-    fun lookupBatch(phones: List<String>): Map<String, CustomerInfo> {
+    /** 여러 전화번호를 일괄 조회합니다 (1:N). */
+    fun lookupBatch(phones: List<String>): Map<String, List<CustomerInfo>> {
         return phones
                 .filter { it.isNotBlank() }
                 .mapNotNull { phone ->
@@ -97,7 +103,7 @@ class ReferenceDataService {
     // Excel 파싱
     // ========================
 
-    private fun parseExcel(file: MultipartFile): Map<String, CustomerInfo> {
+    private fun parseExcel(file: MultipartFile): Map<String, List<CustomerInfo>> {
         val workbook = WorkbookFactory.create(file.inputStream)
 
         // "원장" 시트 찾기 (없으면 첫 번째 시트)
@@ -123,7 +129,7 @@ class ReferenceDataService {
 
         if (phoneCol == -1) throw IllegalArgumentException("전화번호 컬럼을 찾을 수 없습니다. (헤더에 '전화', '연락처', '핸드폰' 등이 필요)")
 
-        val map = mutableMapOf<String, CustomerInfo>()
+        val map = mutableMapOf<String, MutableList<CustomerInfo>>()
         for (i in 1..sheet.lastRowNum) {
             val row = sheet.getRow(i) ?: continue
             val phone = normalizePhone(getCellString(row, phoneCol))
@@ -133,7 +139,12 @@ class ReferenceDataService {
             val address = if (addressCol >= 0) getCellString(row, addressCol) else ""
 
             if (name.isNotBlank() || address.isNotBlank()) {
-                map[phone] = CustomerInfo(name = name, address = address, phone = phone)
+                val info = CustomerInfo(name = name, address = address, phone = phone)
+                val list = map.getOrPut(phone) { mutableListOf() }
+                // 이름+주소가 완전히 같은 중복은 제거
+                if (list.none { it.name == info.name && it.address == info.address }) {
+                    list.add(info)
+                }
             }
         }
 
@@ -145,32 +156,35 @@ class ReferenceDataService {
     // 캐시 저장/로드 (TSV)
     // ========================
 
-    private fun saveToCache(map: Map<String, CustomerInfo>, fileName: String?) {
+    private fun saveToCache(map: Map<String, List<CustomerInfo>>, fileName: String?) {
         try {
             Files.createDirectories(DATA_DIR)
 
-            // TSV 캐시: phone\tname\taddress
+            // TSV 캐시: phone\tname\taddress (같은 phone이 여러 줄 가능)
             BufferedWriter(Files.newBufferedWriter(CACHE_FILE)).use { writer ->
-                for ((_, info) in map) {
-                    // 탭/줄바꿈을 공백으로 치환 (TSV 안전)
-                    val safeName = info.name.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
-                    val safeAddr = info.address.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
-                    writer.write("${info.phone}${TSV_SEPARATOR}${safeName}${TSV_SEPARATOR}${safeAddr}")
-                    writer.newLine()
+                for ((_, infoList) in map) {
+                    for (info in infoList) {
+                        // 탭/줄바꿈을 공백으로 치환 (TSV 안전)
+                        val safeName = info.name.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+                        val safeAddr = info.address.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+                        writer.write("${info.phone}${TSV_SEPARATOR}${safeName}${TSV_SEPARATOR}${safeAddr}")
+                        writer.newLine()
+                    }
                 }
             }
 
             // 메타 정보 (파일명)
             Files.writeString(META_FILE, fileName ?: "unknown")
 
-            logger.info { "참조 데이터 캐시 저장 완료: ${map.size}건 → $CACHE_FILE" }
+            val totalEntries = map.values.sumOf { it.size }
+            logger.info { "참조 데이터 캐시 저장 완료: ${totalEntries}건 → $CACHE_FILE" }
         } catch (e: Exception) {
             logger.error(e) { "참조 데이터 캐시 저장 실패: ${e.message}" }
         }
     }
 
     private fun loadFromCache(): Int {
-        val map = mutableMapOf<String, CustomerInfo>()
+        val map = mutableMapOf<String, MutableList<CustomerInfo>>()
 
         BufferedReader(Files.newBufferedReader(CACHE_FILE)).use { reader ->
             var line: String?
@@ -181,7 +195,8 @@ class ReferenceDataService {
                     val name = parts[1]
                     val address = parts[2]
                     if (phone.isNotBlank()) {
-                        map[phone] = CustomerInfo(name = name, address = address, phone = phone)
+                        map.getOrPut(phone) { mutableListOf() }
+                            .add(CustomerInfo(name = name, address = address, phone = phone))
                     }
                 }
             }
@@ -194,7 +209,7 @@ class ReferenceDataService {
             Files.readString(META_FILE).trim().ifBlank { null }
         } else null
 
-        return map.size
+        return map.values.sumOf { it.size }
     }
 
     // ========================
