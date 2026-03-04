@@ -162,12 +162,12 @@ class ReferenceDataService {
 
             // TSV 캐시: phone\tname\taddress (같은 phone이 여러 줄 가능)
             BufferedWriter(Files.newBufferedWriter(CACHE_FILE)).use { writer ->
-                for ((_, infoList) in map) {
+                for ((phone, infoList) in map) {
                     for (info in infoList) {
                         // 탭/줄바꿈을 공백으로 치환 (TSV 안전)
                         val safeName = info.name.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
                         val safeAddr = info.address.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
-                        writer.write("${info.phone}${TSV_SEPARATOR}${safeName}${TSV_SEPARATOR}${safeAddr}")
+                        writer.write("${phone}${TSV_SEPARATOR}${safeName}${TSV_SEPARATOR}${safeAddr}")
                         writer.newLine()
                     }
                 }

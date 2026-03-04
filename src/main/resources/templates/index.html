@@ -1633,6 +1633,12 @@
             return list ? list.length : 0;
         }
 
+        // 클릭된 뱃지에서 현재 data-index를 동적으로 읽기 (드래그/삭제 후에도 정확)
+        function getBadgeIdx(badgeEl, slotClass) {
+            var slot = badgeEl.closest('.' + slotClass);
+            return slot ? parseInt(slot.getAttribute('data-index')) : -1;
+        }
+
         // 이름 DB 배지 렌더링
         function renderDbBadge(idx, applied) {
             const slot = document.querySelector('.db-badge-slot[data-index="' + idx + '"]');
@@ -1649,10 +1655,10 @@
             const cntLabel = cnt > 1 ? '(' + cnt + ')' : '';
 
             if (applied) {
-                slot.innerHTML = '<span class="db-badge applied" onclick="toggleDbMatch(' + idx + ')" ' +
+                slot.innerHTML = '<span class="db-badge applied" onclick="toggleDbMatch(getBadgeIdx(this,\'db-badge-slot\'))" ' +
                     'title="클릭하면 이름을 OCR 원본으로 복원">↩원복</span>';
             } else {
-                slot.innerHTML = '<span class="db-badge" onclick="toggleDbMatch(' + idx + ')" ' +
+                slot.innerHTML = '<span class="db-badge" onclick="toggleDbMatch(getBadgeIdx(this,\'db-badge-slot\'))" ' +
                     'title="DB ' + cnt + '건 매칭">📋DB' + cntLabel + '</span>';
             }
         }
@@ -1677,10 +1683,10 @@
             const cntLabel = cnt > 1 ? '(' + cnt + ')' : '';
 
             if (applied) {
-                slot.innerHTML = '<span class="db-badge applied" onclick="toggleDbMatchAddr(' + idx + ')" ' +
+                slot.innerHTML = '<span class="db-badge applied" onclick="toggleDbMatchAddr(getBadgeIdx(this,\'db-badge-slot-addr\'))" ' +
                     'title="클릭하면 주소를 OCR 원본으로 복원">↩원복</span>';
             } else {
-                slot.innerHTML = '<span class="db-badge" onclick="toggleDbMatchAddr(' + idx + ')" ' +
+                slot.innerHTML = '<span class="db-badge" onclick="toggleDbMatchAddr(getBadgeIdx(this,\'db-badge-slot-addr\'))" ' +
                     'title="DB ' + cnt + '건 매칭">📋DB' + cntLabel + '</span>';
             }
         }
