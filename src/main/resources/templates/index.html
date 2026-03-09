@@ -1004,8 +1004,8 @@
                         }
                     });
 
-                    // 전체 누적된 파일들을 오름차순(오래된 파일 순) 정렬
-                    const sortedFiles = Array.from(accumulatedFiles.files).sort((a, b) => a.lastModified - b.lastModified);
+                    // 전체 누적된 파일들을 내림차순(최신 파일 순) 정렬
+                    const sortedFiles = Array.from(accumulatedFiles.files).sort((a, b) => b.lastModified - a.lastModified);
                     accumulatedFiles.items.clear();
                     sortedFiles.forEach(f => accumulatedFiles.items.add(f));
 
