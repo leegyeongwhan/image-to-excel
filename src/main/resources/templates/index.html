@@ -246,6 +246,46 @@
             background: #c82333;
         }
 
+        /* 행 삽입 툴바 */
+        .insert-row-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+            font-size: 0.85rem;
+        }
+        .insert-row-toolbar label {
+            font-weight: 600;
+            color: #555;
+            white-space: nowrap;
+        }
+        .insert-row-toolbar input[type="number"] {
+            width: 70px;
+            padding: 0.25rem 0.4rem;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            text-align: center;
+        }
+        .btn-insert {
+            background: #17a2b8;
+            color: white;
+            border: none;
+            padding: 0.3rem 0.7rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            white-space: nowrap;
+            transition: background 0.3s;
+        }
+        .btn-insert:hover { background: #138496; }
+        .btn-insert.img { background: #6f42c1; }
+        .btn-insert.img:hover { background: #5a32a3; }
+
         /* 모달 스타일 (juso.go.kr 공식 테마 적용) */
         .modal-overlay {
             display: none;
@@ -850,6 +890,15 @@
                 <span class="ref-match-result" id="refMatchResult"></span>
             </div>
 
+            <div class="insert-row-toolbar">
+                <label>행 삽입:</label>
+                <input type="number" id="insertPosition" min="1" placeholder="행 번호">
+                <button type="button" class="btn-insert" onclick="insertEmptyRow()">직접 입력</button>
+                <button type="button" class="btn-insert img" onclick="insertByImage()">이미지로 추가</button>
+                <input type="file" id="insertImageInput" accept="image/*" multiple style="display:none">
+                <span id="insertStatus" style="color:#888; font-size:0.8rem;"></span>
+            </div>
+
             <table class="result-table" id="resultTable">
                 <thead>
                     <tr>
@@ -911,6 +960,7 @@
             <form method="post" action="/download" class="actions" id="downloadForm">
                 <input type="hidden" name="ordersJson" id="ordersJsonInput" th:value="${ordersJson}">
                 <button type="submit" class="btn btn-success">Excel 다운로드</button>
+                <button type="button" class="btn" style="background:#6c757d; color:white;" onclick="reverseAllRows()">↕ 순서 뒤집기</button>
                 <a href="/" class="btn" style="text-decoration: none;">새로 업로드</a>
             </form>
         </div>
@@ -1496,6 +1546,173 @@
                 const dbSlotAddr = tr.querySelector('.db-badge-slot-addr');
                 if (dbSlotAddr) dbSlotAddr.setAttribute('data-index', i);
             });
+        }
+
+        // === 행 삽입 기능 ===
+        function createOrderRow(index, order) {
+            const tr = document.createElement('tr');
+            tr.setAttribute('data-index', index);
+            tr.setAttribute('draggable', 'true');
+            tr.setAttribute('ondragstart', 'handleDragStart(event)');
+            tr.setAttribute('ondragover', 'handleDragOver(event)');
+            tr.setAttribute('ondragleave', 'handleDragLeave(event)');
+            tr.setAttribute('ondrop', 'handleDrop(event)');
+            tr.setAttribute('ondragend', 'handleDragEnd(event)');
+
+            const addrStyle = order.addressValid === false ? 'color: red; font-weight: bold;' : '';
+
+            tr.innerHTML =
+                '<td style="text-align: center;"><span class="drag-handle" title="드래그하여 순서 변경">☰</span></td>' +
+                '<td class="row-num">' + (index + 1) + '</td>' +
+                '<td style="text-align: center;"><input type="checkbox" class="row-checkbox" onclick="toggleRowCheck(this)"></td>' +
+                '<td><div class="name-cell">' +
+                    '<input type="text" class="edit-input" value="' + escapeHtml(order.name || '') + '" data-index="' + index + '" data-field="name" onchange="updateOrderData(this)">' +
+                    '<span class="db-badge-slot" data-index="' + index + '"></span>' +
+                '</div></td>' +
+                '<td><div class="address-cell">' +
+                    '<input type="text" class="edit-input address-text" lang="ko" value="' + escapeHtml(order.address || '') + '" style="' + addrStyle + '" data-index="' + index + '" data-field="address" onchange="updateOrderData(this)">' +
+                    '<span class="db-badge-slot-addr" data-index="' + index + '"></span>' +
+                    '<button type="button" class="btn-search" data-index="' + index + '" data-address="' + escapeHtml(order.address || '') + '" onclick="openAddressSearch(this)">주소검색</button>' +
+                '</div></td>' +
+                '<td><input type="text" class="edit-input" value="' + escapeHtml(order.phone || '') + '" data-index="' + index + '" data-field="phone" onchange="updateOrderData(this)"></td>' +
+                '<td><button type="button" class="btn-delete" data-index="' + index + '" onclick="deleteOrder(this)">삭제</button></td>';
+            return tr;
+        }
+
+        function syncJson(orders) {
+            const jsonInput = document.getElementById('ordersJsonInput');
+            const existingOrdersJsonInput = document.getElementById('existingOrdersJsonInput');
+            const newJson = JSON.stringify(orders);
+            if (jsonInput) jsonInput.value = newJson;
+            if (existingOrdersJsonInput) existingOrdersJsonInput.value = newJson;
+
+            const totalStrong = document.querySelector('.alert-success strong');
+            if (totalStrong) totalStrong.textContent = orders.length;
+        }
+
+        function getInsertIndex() {
+            const posInput = document.getElementById('insertPosition');
+            const pos = parseInt(posInput.value);
+            const jsonInput = document.getElementById('ordersJsonInput');
+            if (!jsonInput) return -1;
+            const orders = JSON.parse(jsonInput.value);
+            if (isNaN(pos) || pos < 1) {
+                // 값 없으면 맨 끝
+                return orders.length;
+            }
+            // pos번 행 = index (pos-1) 에 삽입
+            return Math.min(pos - 1, orders.length);
+        }
+
+        function insertEmptyRow() {
+            const jsonInput = document.getElementById('ordersJsonInput');
+            if (!jsonInput) return;
+            try {
+                const orders = JSON.parse(jsonInput.value);
+                const index = getInsertIndex();
+                const newOrder = { name: '', address: '', phone: '', addressValid: true };
+                orders.splice(index, 0, newOrder);
+                syncJson(orders);
+
+                const tbody = document.getElementById('resultTableBody');
+                const tr = createOrderRow(index, newOrder);
+                const rows = tbody.querySelectorAll('tr');
+                if (rows[index]) {
+                    rows[index].before(tr);
+                } else {
+                    tbody.appendChild(tr);
+                }
+                reindexRows();
+
+                // 삽입된 행 하이라이트
+                tr.style.background = '#e8f5e9';
+                setTimeout(() => { tr.style.background = ''; }, 1500);
+
+                document.getElementById('insertStatus').textContent = (index + 1) + '번 행에 빈 행 삽입 완료';
+                setTimeout(() => { document.getElementById('insertStatus').textContent = ''; }, 3000);
+            } catch (e) {
+                console.error('빈 행 삽입 오류:', e);
+                alert('행 삽입 중 오류가 발생했습니다.');
+            }
+        }
+
+        function insertByImage() {
+            const jsonInput = document.getElementById('ordersJsonInput');
+            if (!jsonInput) return;
+            const index = getInsertIndex();
+            const imageInput = document.getElementById('insertImageInput');
+            // 이전 이벤트 제거 후 새로 등록
+            imageInput.value = '';
+            imageInput.onchange = function() {
+                if (!this.files.length) return;
+                const formData = new FormData();
+                Array.from(this.files).forEach(f => formData.append('files', f));
+
+                const status = document.getElementById('insertStatus');
+                status.textContent = 'OCR 분석 중...';
+
+                fetch('/api/insert-ocr', { method: 'POST', body: formData })
+                    .then(res => res.json())
+                    .then(newOrders => {
+                        const orders = JSON.parse(jsonInput.value);
+                        // 삽입 위치에 새 주문들 추가
+                        orders.splice(index, 0, ...newOrders);
+                        syncJson(orders);
+
+                        const tbody = document.getElementById('resultTableBody');
+                        const rows = tbody.querySelectorAll('tr');
+                        const refNode = rows[index] || null;
+
+                        const insertedRows = [];
+                        newOrders.forEach((order, i) => {
+                            const tr = createOrderRow(index + i, order);
+                            if (refNode) {
+                                refNode.before(tr);
+                            } else {
+                                tbody.appendChild(tr);
+                            }
+                            insertedRows.push(tr);
+                        });
+                        reindexRows();
+
+                        // 삽입된 행들 하이라이트
+                        insertedRows.forEach(tr => {
+                            tr.style.background = '#e8f5e9';
+                            setTimeout(() => { tr.style.background = ''; }, 2000);
+                        });
+
+                        status.textContent = newOrders.length + '건 OCR 삽입 완료 (' + (index + 1) + '번 행부터)';
+                        setTimeout(() => { status.textContent = ''; }, 4000);
+
+                        // 새로 삽입된 행들에 대해 DB 매칭 시도
+                        if (typeof scanDbMatches === 'function') {
+                            scanDbMatches();
+                        }
+                    })
+                    .catch(err => {
+                        console.error('이미지 OCR 삽입 오류:', err);
+                        status.textContent = 'OCR 처리 중 오류 발생';
+                    });
+            };
+            imageInput.click();
+        }
+
+        // === 순서 뒤집기 ===
+        function reverseAllRows() {
+            const jsonInput = document.getElementById('ordersJsonInput');
+            if (!jsonInput) return;
+            try {
+                const orders = JSON.parse(jsonInput.value);
+                orders.reverse();
+                syncJson(orders);
+
+                const tbody = document.getElementById('resultTableBody');
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                rows.reverse().forEach(tr => tbody.appendChild(tr));
+                reindexRows();
+            } catch (e) {
+                console.error('순서 뒤집기 오류:', e);
+            }
         }
 
         // === 체크박스(책갈피) 기능 ===

@@ -6,6 +6,7 @@ import com.imagetoexcel.infrastructure.JusoAddress
 import com.imagetoexcel.infrastructure.JusoSearchResult
 import com.imagetoexcel.infrastructure.NaverGeocodingClient
 import com.imagetoexcel.service.ReferenceDataService
+import com.imagetoexcel.dto.OrderData
 import com.imagetoexcel.service.UploadService
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -133,6 +134,14 @@ class UploadController(
         }.toMap()
         val totalMatches = results.values.sumOf { it.size }
         return mapOf("matches" to mapped, "matchCount" to totalMatches)
+    }
+
+    /** 이미지를 OCR 처리 후 JSON으로 반환 (페이지 리로드 없이 AJAX) */
+    @PostMapping("/api/insert-ocr")
+    @ResponseBody
+    fun insertOcr(@RequestParam("files") files: List<MultipartFile>): List<OrderData> {
+        val validFiles = files.filter { !it.isEmpty }
+        return uploadService.extractOrders(validFiles)
     }
 
     @PostMapping("/download")
