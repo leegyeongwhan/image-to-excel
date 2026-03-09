@@ -56,6 +56,6 @@ class UploadService(
 
     fun generateExcel(ordersJson: String): ByteArray {
         val orders: List<OrderData> = objectMapper.readValue(ordersJson)
-        return orderExcelGenerator.createExcel(orders)
+        return orderExcelGenerator.createExcel(orders.reversed())
     }
 }
